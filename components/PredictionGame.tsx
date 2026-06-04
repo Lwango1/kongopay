@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { TrendingUp, TrendingDown, Zap, Trophy, Clock, Flame, Droplet } from "lucide-react";
+import { TrendingUp, TrendingDown, Zap, Trophy, Clock, Flame, Droplet, AlertTriangle } from "lucide-react";
 
 interface IndexData {
   price: number;
@@ -9,6 +9,16 @@ interface IndexData {
   history: number[];
   type: string;
   number: number;
+  lastSpikeTime: number;
+  lastSpikeDirection: "up" | "down" | null;
+}
+
+interface SpikePrediction {
+  spikeProbability: number;
+  expectedDirection: string;
+  estimatedMagnitude: string;
+  timeSinceLastSpike: number;
+  isSpikeImminent: boolean;
 }
 
 type Prediction = "UP" | "DOWN" | null;
@@ -24,6 +34,7 @@ const INDICES = [
 
 export default function PredictionGame() {
   const [state, setState] = useState<Record<string, IndexData> | null>(null);
+  const [spike, setSpike] = useState<SpikePrediction | null>(null);
   const [activeKey, setActiveKey] = useState("BOOM_500");
   const [prediction, setPrediction] = useState<Prediction>(null);
   const [betAmount, setBetAmount] = useState(100);
@@ -35,10 +46,17 @@ export default function PredictionGame() {
 
   const fetchState = useCallback(async () => {
     try {
-      const res = await fetch("/api/deriv/state");
-      if (res.ok) setState(await res.json());
+      const [stateRes, spikeRes] = await Promise.all([
+        fetch("/api/deriv/state"),
+        fetch(`/api/deriv/spike?${activeKey.replace("_", "&number=").replace("BOOM", "type=BOOM").replace("CRASH", "type=CRASH")}`),
+      ]);
+      if (stateRes.ok) setState(await stateRes.json());
+      if (spikeRes.ok) {
+        const data = await spikeRes.json();
+        setSpike(data.prediction);
+      }
     } catch { /* ignore */ }
-  }, []);
+  }, [activeKey]);
 
   useEffect(() => {
     fetchState();
@@ -56,7 +74,6 @@ export default function PredictionGame() {
       if (currentIdx) {
         const current = currentIdx.price;
         const prev = currentIdx.history[currentIdx.history.length - 2] || current;
-
         if ((prediction === "UP" && current >= prev) || (prediction === "DOWN" && current <= prev)) {
           setResult("win");
           setScore((s) => s + betAmount);
@@ -88,6 +105,8 @@ export default function PredictionGame() {
   const maxH = Math.max(...history, 1);
   const range = maxH - minH || 1;
 
+  const spikeColor = spike?.isSpikeImminent ? "#ef4444" : spike && spike.spikeProbability > 50 ? "#f59e0b" : "#22c55e";
+
   return (
     <section className="py-20 px-4 border-t border-border">
       <div className="max-w-6xl mx-auto">
@@ -97,7 +116,7 @@ export default function PredictionGame() {
             Prédisez le Marché
           </h2>
           <p className="text-text-secondary max-w-xl mx-auto">
-            Devinez si le prix va monter ou baisser dans les 30 prochaines secondes sur les indices synthétiques.
+            Devinez la direction ou anticipez les spikes sur les indices synthétiques Boom & Crash.
           </p>
         </div>
 
@@ -107,7 +126,7 @@ export default function PredictionGame() {
               const key = `${idx.type}_${idx.number}`;
               const isActive = key === activeKey;
               return (
-                <button key={key} onClick={() => { setActiveKey(key); setPrediction(null); setLocked(false); setResult(null); }}
+                <button key={key} onClick={() => { setActiveKey(key); setPrediction(null); setLocked(false); setResult(null); setSpike(null); }}
                   className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-medium transition-all ${isActive ? "bg-surface border border-primary/40 text-text" : "bg-background border border-border text-text-secondary hover:bg-surface hover:border-border"}`}>
                   <idx.icon size={18} style={{ color: idx.color }} />
                   <span>{idx.label}</span>
@@ -147,6 +166,43 @@ export default function PredictionGame() {
                 ))}
               </div>
             </div>
+
+            {spike && (
+              <div className={`rounded-xl border p-4 transition-all ${spike.isSpikeImminent ? "border-red-500/50 bg-red-500/10" : spike.spikeProbability > 50 ? "border-yellow-500/30 bg-yellow-500/5" : "border-border bg-surface/50"}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle size={18} style={{ color: spikeColor }} />
+                    <span className="font-semibold text-sm">Spike Predictor</span>
+                  </div>
+                  <span className="text-lg font-bold font-mono" style={{ color: spikeColor }}>
+                    {spike.spikeProbability}%
+                  </span>
+                </div>
+                <div className="mt-2 w-full h-1.5 rounded-full bg-surface-light overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${spike.spikeProbability}%`, background: spikeColor }} />
+                </div>
+                <div className="grid grid-cols-3 gap-4 mt-3 text-xs text-text-secondary">
+                  <div>
+                    <span className="text-text-muted">Direction</span>
+                    <p className="font-semibold text-text capitalize">{spike.expectedDirection === "up" ? "Hausse" : "Baisse"} ↗</p>
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Ampleur estimée</span>
+                    <p className="font-semibold text-text">{spike.estimatedMagnitude}</p>
+                  </div>
+                  <div>
+                    <span className="text-text-muted">Dernier spike</span>
+                    <p className="font-semibold text-text">Il y a {spike.timeSinceLastSpike}s</p>
+                  </div>
+                </div>
+                {spike.isSpikeImminent && (
+                  <div className="mt-2 flex items-center gap-2 text-red-400 animate-pulse text-sm font-semibold">
+                    <AlertTriangle size={14} />
+                    Spike imminent détecté ! Probabilité élevée.
+                  </div>
+                )}
+              </div>
+            )}
 
             {locked && (
               <div className="flex items-center justify-center gap-3 py-3 rounded-xl bg-surface border border-border">
@@ -191,8 +247,13 @@ export default function PredictionGame() {
             </div>
           </div>
           <div className="rounded-xl border border-border bg-surface/50 p-4 sm:col-span-2">
-            <h4 className="text-xs font-semibold text-text-muted uppercase mb-2">Classement</h4>
-            <p className="text-sm text-text-secondary">Connectez-vous pour apparaître</p>
+            <h4 className="text-xs font-semibold text-text-muted uppercase mb-2 flex items-center gap-2"><AlertTriangle size={14} className="text-warning" /> Conseil</h4>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Le Spike Predictor analyse la volatilité récente et le temps écoulé depuis le dernier spike.
+              {activeIdx?.type === "BOOM"
+                ? " Les indices Boom ont tendance à grimper brusquement après un calme."
+                : " Les indices Crash chutent soudainement après une accalmie."}
+            </p>
           </div>
         </div>
       </div>
