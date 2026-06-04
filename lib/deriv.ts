@@ -1,82 +1,121 @@
-// Simulate Deriv synthetic indices (Boom & Crash)
-// Boom: tends to spike up suddenly
-// Crash: tends to drop suddenly
+// Synthetic indices: Boom (upward spikes) & Crash (downward drops)
+// Higher number = less volatile
+// 500 = high volatility, 900 = medium, 1000 = low
 
-let boomPrice = 12500;
-let crashPrice = 12500;
-let boomHistory: number[] = [];
-let crashHistory: number[] = [];
+type IndexType = "BOOM" | "CRASH";
+
+interface IndexConfig {
+  type: IndexType;
+  number: number;
+  basePrice: number;
+}
+
+interface IndexState {
+  price: number;
+  change24h: number;
+  history: number[];
+}
+
+const INDICES: IndexConfig[] = [
+  { type: "BOOM", number: 500, basePrice: 25000 },
+  { type: "BOOM", number: 900, basePrice: 18000 },
+  { type: "BOOM", number: 1000, basePrice: 15000 },
+  { type: "CRASH", number: 500, basePrice: 25000 },
+  { type: "CRASH", number: 900, basePrice: 18000 },
+  { type: "CRASH", number: 1000, basePrice: 15000 },
+];
+
+function getKey(type: IndexType, num: number) { return `${type}_${num}`; }
+
+const stateMap = new Map<string, IndexState>();
+
+for (const idx of INDICES) {
+  stateMap.set(getKey(idx.type, idx.number), {
+    price: idx.basePrice,
+    change24h: 0,
+    history: [idx.basePrice],
+  });
+}
 
 function seededRandom(seed: number) {
   const x = Math.sin(seed) * 10000;
   return x - Math.floor(x);
 }
 
-function generateTick(type: "boom" | "crash", currentPrice: number, timestamp: number) {
+function generateTick(type: IndexType, num: number, currentPrice: number, timestamp: number) {
   const seed = timestamp / 1000;
   const rand = seededRandom(seed);
-  const spikeRand = seededRandom(seed + 999);
+  const spikeRand = seededRandom(seed + num);
+
+  // Volatility decreases as number increases
+  const volatilityFactor = 1000 / num;
 
   let change: number;
 
-  if (type === "boom") {
-    // Boom has sudden upward spikes
+  if (type === "BOOM") {
     if (spikeRand > 0.97) {
-      change = currentPrice * (0.02 + rand * 0.05); // +2% to +7% spike
+      change = currentPrice * (0.01 + rand * 0.03) * volatilityFactor;
     } else {
-      change = currentPrice * (rand * 0.002 - 0.0005); // -0.05% to +0.15% drift
+      change = currentPrice * (rand * 0.002 - 0.0005) * (volatilityFactor * 0.5);
     }
   } else {
-    // Crash has sudden downward drops
     if (spikeRand > 0.97) {
-      change = -currentPrice * (0.02 + rand * 0.05); // -2% to -7% drop
+      change = -currentPrice * (0.01 + rand * 0.03) * volatilityFactor;
     } else {
-      change = currentPrice * (rand * 0.002 - 0.0015); // -0.15% to +0.05% drift
+      change = currentPrice * (rand * 0.002 - 0.0015) * (volatilityFactor * 0.5);
     }
   }
 
-  const newPrice = Math.max(currentPrice + change, currentPrice * 0.5);
+  const newPrice = Math.max(currentPrice + change, currentPrice * 0.3);
   return Math.round(newPrice * 100) / 100;
 }
 
 export function getDerivState() {
   const now = Date.now();
 
-  for (let i = 0; i < 5; i++) {
-    const t = now - (5 - i) * 200;
-    boomPrice = generateTick("boom", boomPrice, t);
-    crashPrice = generateTick("crash", crashPrice, t);
+  for (const idx of INDICES) {
+    const key = getKey(idx.type, idx.number);
+    const st = stateMap.get(key)!;
+
+    for (let i = 0; i < 5; i++) {
+      const t = now - (5 - i) * 200;
+      st.price = generateTick(idx.type, idx.number, st.price, t);
+    }
+
+    st.history.push(st.price);
+    if (st.history.length > 200) st.history.shift();
+    st.change24h = st.history.length > 1 ? ((st.price - st.history[0]) / st.history[0]) * 100 : 0;
   }
 
-  boomHistory.push(boomPrice);
-  crashHistory.push(crashPrice);
+  const result: Record<string, any> = { timestamp: now };
 
-  if (boomHistory.length > 200) boomHistory.shift();
-  if (crashHistory.length > 200) crashHistory.shift();
+  for (const idx of INDICES) {
+    const key = getKey(idx.type, idx.number);
+    const st = stateMap.get(key)!;
+    const label = `${idx.type.toLowerCase()}_${idx.number}`;
+    result[label] = {
+      price: st.price,
+      change24h: st.change24h,
+      history: st.history.slice(-100),
+      type: idx.type,
+      number: idx.number,
+    };
+  }
 
-  return {
-    boom: {
-      price: boomPrice,
-      change24h: boomHistory.length > 1 ? ((boomPrice - boomHistory[0]) / boomHistory[0]) * 100 : 0,
-      history: boomHistory.slice(-100),
-    },
-    crash: {
-      price: crashPrice,
-      change24h: crashHistory.length > 1 ? ((crashPrice - crashHistory[0]) / crashHistory[0]) * 100 : 0,
-      history: crashHistory.slice(-100),
-    },
-    timestamp: now,
-  };
+  return result;
 }
 
-export function predictNextTick(type: "boom" | "crash") {
-  const state = getDerivState();
-  const current = type === "boom" ? state.boom.price : state.crash.price;
-  const history = type === "boom" ? state.boom.history : state.crash.history;
+export function predictNextTick(type: IndexType, num: number) {
+  const key = getKey(type, num);
+  const st = stateMap.get(key);
 
-  const recentChanges = history.slice(-10).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
-  const avgChange = recentChanges.reduce((a, b) => a + b, 0) / recentChanges.length;
-  const volatility = Math.sqrt(recentChanges.reduce((a, b) => a + b * b, 0) / recentChanges.length);
+  if (!st) {
+    return { error: "Index not found" };
+  }
+
+  const recentChanges = st.history.slice(-20).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
+  const avgChange = recentChanges.reduce((a, b) => a + b, 0) / (recentChanges.length || 1);
+  const volatility = Math.sqrt(recentChanges.reduce((a, b) => a + b * b, 0) / (recentChanges.length || 1));
 
   const rand = Math.random();
   const prediction = rand > 0.5 ? "UP" : "DOWN";
@@ -84,7 +123,8 @@ export function predictNextTick(type: "boom" | "crash") {
 
   return {
     type,
-    currentPrice: current,
+    number: num,
+    currentPrice: st.price,
     prediction,
     confidence: Math.round(confidence * 100),
     timestamp: Date.now(),
