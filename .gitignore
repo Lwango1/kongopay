@@ -6,7 +6,12 @@ build/
 *.log
 *.err
 .DS_Store
+.next/
+.vercel/
+
 android/app/build/
 ios/Pods/
 .cache/
 firebase-debug.log
+
+.vercel
