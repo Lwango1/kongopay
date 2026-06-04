@@ -19,6 +19,10 @@ interface SpikePrediction {
   estimatedMagnitude: string;
   timeSinceLastSpike: number;
   isSpikeImminent: boolean;
+  pricePosition: number;
+  consecutiveMoves: number;
+  rangeLow: number;
+  rangeHigh: number;
 }
 
 type Prediction = "UP" | "DOWN" | null;
@@ -181,19 +185,29 @@ export default function PredictionGame() {
                 <div className="mt-2 w-full h-1.5 rounded-full bg-surface-light overflow-hidden">
                   <div className="h-full rounded-full transition-all duration-500" style={{ width: `${spike.spikeProbability}%`, background: spikeColor }} />
                 </div>
-                <div className="grid grid-cols-3 gap-4 mt-3 text-xs text-text-secondary">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs text-text-secondary">
                   <div>
                     <span className="text-text-muted">Direction</span>
-                    <p className="font-semibold text-text capitalize">{spike.expectedDirection === "up" ? "Hausse" : "Baisse"} ↗</p>
+                    <p className="font-semibold text-text capitalize">{spike.expectedDirection === "up" ? "Hausse ↗" : "Baisse ↘"}</p>
                   </div>
                   <div>
                     <span className="text-text-muted">Ampleur estimée</span>
                     <p className="font-semibold text-text">{spike.estimatedMagnitude}</p>
                   </div>
                   <div>
-                    <span className="text-text-muted">Dernier spike</span>
-                    <p className="font-semibold text-text">Il y a {spike.timeSinceLastSpike}s</p>
+                    <span className="text-text-muted">Position prix</span>
+                    <p className="font-semibold text-text">{spike.pricePosition}% du range</p>
                   </div>
+                  <div>
+                    <span className="text-text-muted">Mouvements consécutifs</span>
+                    <p className="font-semibold text-text">{spike.consecutiveMoves}/5</p>
+                  </div>
+                </div>
+                <div className="mt-2 p-2 rounded-lg bg-background border border-border text-xs text-text-secondary">
+                  <span className="text-text-muted">Logique : </span>
+                  {activeIdx?.type === "BOOM"
+                    ? `Boom spike UP quand le prix est bas (${spike.pricePosition}% du range). ${spike.consecutiveMoves} baisses consécutives détectées.`
+                    : `Crash spike DOWN quand le prix est haut (${spike.pricePosition}% du range). ${spike.consecutiveMoves} hausses consécutives détectées.`}
                 </div>
                 {spike.isSpikeImminent && (
                   <div className="mt-2 flex items-center gap-2 text-red-400 animate-pulse text-sm font-semibold">
@@ -247,12 +261,10 @@ export default function PredictionGame() {
             </div>
           </div>
           <div className="rounded-xl border border-border bg-surface/50 p-4 sm:col-span-2">
-            <h4 className="text-xs font-semibold text-text-muted uppercase mb-2 flex items-center gap-2"><AlertTriangle size={14} className="text-warning" /> Conseil</h4>
+            <h4 className="text-xs font-semibold text-text-muted uppercase mb-2 flex items-center gap-2"><AlertTriangle size={14} className="text-warning" /> Stratégie Spike</h4>
             <p className="text-xs text-text-secondary leading-relaxed">
-              Le Spike Predictor analyse la volatilité récente et le temps écoulé depuis le dernier spike.
-              {activeIdx?.type === "BOOM"
-                ? " Les indices Boom ont tendance à grimper brusquement après un calme."
-                : " Les indices Crash chutent soudainement après une accalmie."}
+              <strong className="text-text">Boom :</strong> Alerte sur dernier point <strong className="text-success">BAS</strong> → prédit un spike HAUSSE. &nbsp;
+              <strong className="text-text">Crash :</strong> Alerte sur dernier point <strong className="text-danger">HAUT</strong> → prédit un spike BAISSE.
             </p>
           </div>
         </div>

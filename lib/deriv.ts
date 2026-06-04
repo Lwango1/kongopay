@@ -162,28 +162,44 @@ export function predictSpike(type: IndexType, num: number) {
   if (!st) return { error: "Index not found" };
 
   const history = st.history;
-  const recent = history.slice(-40);
-  const changes = recent.map((p, i, arr) => i > 0 ? Math.abs(p - arr[i - 1]) : 0).slice(1);
+  const lookback = history.slice(-50);
+  const minPrice = Math.min(...lookback);
+  const maxPrice = Math.max(...lookback);
+  const range = maxPrice - minPrice || 1;
 
-  const avgRecentVolatility = changes.slice(-10).reduce((a, b) => a + b, 0) / 10;
-  const avgOverallVolatility = changes.reduce((a, b) => a + b, 0) / changes.length;
+  // Position of current price within recent range (0 = low, 1 = high)
+  const position = (st.price - minPrice) / range;
 
-  // Calm before storm: if recent volatility is lower than average, spike may be coming
-  const calmFactor = avgOverallVolatility > 0 ? Math.max(0, 1 - avgRecentVolatility / avgOverallVolatility) : 0;
+  // Boom: spike UP when price is near a LOW (position close to 0)
+  // Crash: spike DOWN when price is near a HIGH (position close to 1)
+  let extremeFactor: number;
+  let expectedDirection: string;
+
+  if (type === "BOOM") {
+    // Closer to low = more likely to spike UP
+    extremeFactor = 1 - position;
+    expectedDirection = "up";
+  } else {
+    // Closer to high = more likely to spike DOWN
+    extremeFactor = position;
+    expectedDirection = "down";
+  }
+
+  // Consecutive moves in the opposite direction increase probability
+  const recentMoves = history.slice(-15).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
+  const consecutive = recentMoves.slice(-5).filter(m => type === "BOOM" ? m < 0 : m > 0).length;
+  const momentumFactor = Math.min(consecutive / 5, 1);
 
   // Time since last spike: longer = more likely
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
-  const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
+  const timeFactor = Math.min(msSinceLastSpike / 20000, 1);
 
   // Combined probability
-  const spikeProbability = Math.min((calmFactor * 0.6 + timeFactor * 0.4) * 100, 95);
-
-  // Expected spike direction
-  const expectedDirection = type === "BOOM" ? "up" : "down";
+  const spikeProbability = Math.min((extremeFactor * 0.5 + momentumFactor * 0.3 + timeFactor * 0.2) * 100, 95);
 
   // Estimated spike magnitude
   const volatilityFactor = 1000 / num;
-  const estimatedMagnitude = ((0.02 + Math.random() * 0.06) * volatilityFactor * 100).toFixed(1);
+  const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * volatilityFactor * 100).toFixed(1);
 
   return {
     type,
@@ -194,6 +210,11 @@ export function predictSpike(type: IndexType, num: number) {
     estimatedMagnitude: `${estimatedMagnitude}%`,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
     isSpikeImminent: spikeProbability > 70,
+    // Technical details for display
+    pricePosition: Math.round(position * 100),
+    consecutiveMoves: consecutive,
+    rangeLow: minPrice,
+    rangeHigh: maxPrice,
     timestamp: Date.now(),
   };
 }
