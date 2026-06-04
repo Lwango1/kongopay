@@ -4,6 +4,7 @@ node_modules/
 dist/
 build/
 *.log
+*.err
 .DS_Store
 android/app/build/
 ios/Pods/
