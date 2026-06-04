@@ -3,7 +3,9 @@ import Hero from "@/components/Hero";
 import Features from "@/components/Features";
 import MarketOverview from "@/components/MarketOverview";
 import TradingMockup from "@/components/TradingMockup";
+import PredictionGame from "@/components/PredictionGame";
 import Converter from "@/components/Converter";
+import PriceAlert from "@/components/PriceAlert";
 import Footer from "@/components/Footer";
 
 export default function Home() {
@@ -15,7 +17,9 @@ export default function Home() {
         <Features />
         <MarketOverview />
         <TradingMockup />
+        <PredictionGame />
         <Converter />
+        <PriceAlert />
       </main>
       <Footer />
     </>
