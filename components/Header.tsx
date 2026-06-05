@@ -6,6 +6,7 @@ import { Menu, X, ChevronDown } from "lucide-react";
 const NAV_ITEMS = [
   { label: "Accueil", href: "/" },
   { label: "Marchés", href: "/marches" },
+  { label: "Synthétiques", href: "/marches#deriv" },
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
   { label: "Apprendre", href: "/apprendre" },

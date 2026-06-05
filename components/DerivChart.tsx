@@ -180,7 +180,7 @@ export default function DerivChart() {
   }
 
   return (
-    <section className="py-20 px-4 border-t border-border">
+    <section id="deriv" className="py-20 px-4 border-t border-border">
       <div className="max-w-7xl mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
           <div>
