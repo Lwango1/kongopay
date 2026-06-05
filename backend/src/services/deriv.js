@@ -214,29 +214,74 @@ class DerivLiveService {
     return result;
   }
 
+  findSwingLevels(prices) {
+    const lookback = prices.slice(-60);
+    const swingHighs = [];
+    const swingLows = [];
+
+    for (let i = 2; i < lookback.length - 2; i++) {
+      const prev2 = lookback[i - 2];
+      const prev1 = lookback[i - 1];
+      const curr = lookback[i];
+      const next1 = lookback[i + 1];
+      const next2 = lookback[i + 2];
+
+      if (curr > prev1 && curr > prev2 && curr > next1 && curr > next2) {
+        swingHighs.push({ price: curr, index: i });
+      }
+      if (curr < prev1 && curr < prev2 && curr < next1 && curr < next2) {
+        swingLows.push({ price: curr, index: i });
+      }
+    }
+
+    const lastSwingHigh = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].price : Math.max(...lookback);
+    const lastSwingLow = swingLows.length > 0 ? swingLows[swingLows.length - 1].price : Math.min(...lookback);
+    const swingHighIndex = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].index : 0;
+    const swingLowIndex = swingLows.length > 0 ? swingLows[swingLows.length - 1].index : 0;
+
+    return { lastSwingHigh, lastSwingLow, swingHighIndex, swingLowIndex };
+  }
+
   predictSpike(type, num) {
     const key = getKey(type, num);
     const st = this.stateMap.get(key);
-    if (!st || st.history.length < 10) {
+    if (!st || st.history.length < 15) {
       return { error: 'Pas assez de données historiques', connected: st?.connected ?? false };
     }
 
     const history = st.history;
-    const lookback = history.slice(-50);
-    const minPrice = Math.min(...lookback);
-    const maxPrice = Math.max(...lookback);
-    const range = maxPrice - minPrice || 1;
-    const position = (st.price - minPrice) / range;
+    const { lastSwingHigh, lastSwingLow } = this.findSwingLevels(history);
+
+    const currentPrice = st.price;
+    const swingRange = lastSwingHigh - lastSwingLow || 1;
 
     let extremeFactor;
     let expectedDirection;
+    let referenceLevel;
+    let distanceToLevel;
 
     if (type === 'BOOM') {
-      extremeFactor = 1 - position;
+      referenceLevel = lastSwingLow;
+      distanceToLevel = Math.abs(currentPrice - lastSwingLow);
+      const maxDistance = swingRange || currentPrice * 0.02;
+      const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
+      extremeFactor = Math.min(proximity, 1);
       expectedDirection = 'up';
+
+      if (currentPrice < lastSwingLow) {
+        extremeFactor = Math.max(0, extremeFactor * 0.3);
+      }
     } else {
-      extremeFactor = position;
+      referenceLevel = lastSwingHigh;
+      distanceToLevel = Math.abs(currentPrice - lastSwingHigh);
+      const maxDistance = swingRange || currentPrice * 0.02;
+      const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
+      extremeFactor = Math.min(proximity, 1);
       expectedDirection = 'down';
+
+      if (currentPrice > lastSwingHigh) {
+        extremeFactor = Math.max(0, extremeFactor * 0.3);
+      }
     }
 
     const recentMoves = history.slice(-15).map((p, i, arr) => (i > 0 ? p - arr[i - 1] : 0)).slice(1);
@@ -244,25 +289,27 @@ class DerivLiveService {
     const momentumFactor = Math.min(consecutive / 5, 1);
 
     const msSinceLastSpike = Date.now() - st.lastSpikeTime;
-    const timeFactor = Math.min(msSinceLastSpike / 20000, 1);
+    const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
 
-    const spikeProbability = Math.min((extremeFactor * 0.5 + momentumFactor * 0.3 + timeFactor * 0.2) * 100, 95);
+    const spikeProbability = Math.min((extremeFactor * 0.6 + momentumFactor * 0.25 + timeFactor * 0.15) * 100, 95);
     const volatilityFactor = 1000 / num;
     const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * volatilityFactor * 100).toFixed(1);
 
     return {
       type,
       number: num,
-      currentPrice: st.price,
+      currentPrice,
       spikeProbability: Math.round(spikeProbability),
       expectedDirection,
       estimatedMagnitude: `${estimatedMagnitude}%`,
       timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
       isSpikeImminent: spikeProbability > 70,
-      pricePosition: Math.round(position * 100),
+      pricePosition: Math.round(((currentPrice - lastSwingLow) / swingRange) * 100),
       consecutiveMoves: consecutive,
-      rangeLow: minPrice,
-      rangeHigh: maxPrice,
+      rangeLow: lastSwingLow,
+      rangeHigh: lastSwingHigh,
+      referenceLevel,
+      distancePercent: Math.round((distanceToLevel / (swingRange || currentPrice)) * 100),
       connected: st.connected,
       timestamp: Date.now(),
     };

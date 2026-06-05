@@ -28,6 +28,9 @@ interface SpikePrediction {
   timeSinceLastSpike: number;
   isSpikeImminent: boolean;
   pricePosition: number;
+  referenceLevel?: number;
+  distancePercent?: number;
+  consecutiveMoves?: number;
   error?: string;
 }
 
@@ -260,11 +263,23 @@ export default function DerivChart() {
                 <div className="w-full h-1.5 bg-surface-light rounded-full mt-2 overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${spikes[expanded].spikeProbability}%`, background: spikes[expanded].isSpikeImminent ? "#ef4444" : spikes[expanded].spikeProbability > 50 ? "#f59e0b" : "#22c55e" }} />
                 </div>
-                <div className="grid grid-cols-3 gap-4 mt-3 text-xs text-text-secondary">
-                  <div><span className="text-text-muted">Direction </span><span className="font-semibold text-text capitalize">{spikes[expanded].expectedDirection}</span></div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs text-text-secondary">
+                  <div><span className="text-text-muted">Direction </span><span className="font-semibold text-text capitalize">{spikes[expanded].expectedDirection === "up" ? "Hausse ↗" : "Baisse ↘"}</span></div>
                   <div><span className="text-text-muted">Ampleur </span><span className="font-semibold text-text">{spikes[expanded].estimatedMagnitude}</span></div>
                   <div><span className="text-text-muted">Dernier spike </span><span className="font-semibold text-text">il y a {spikes[expanded].timeSinceLastSpike}s</span></div>
+                  <div>
+                    <span className="text-text-muted">{expanded.startsWith("BOOM") ? "Dernier bas" : "Dernier haut"} </span>
+                    <span className="font-semibold text-text font-mono">
+                      ${spikes[expanded].referenceLevel?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                    </span>
+                  </div>
                 </div>
+                {spikes[expanded].consecutiveMoves !== undefined && (
+                  <div className="mt-2 text-[10px] text-text-muted">
+                    Mouvements consécutifs opposés : {spikes[expanded].consecutiveMoves}/5 • 
+                    Distance: {spikes[expanded].distancePercent ?? 0}%
+                  </div>
+                )}
               </div>
             )}
           </div>
