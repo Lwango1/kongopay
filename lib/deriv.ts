@@ -13,6 +13,14 @@ export interface IndexState {
   connected: boolean;
 }
 
+export interface Candlestick {
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
+
 export interface DerivSnapshot {
   timestamp: number;
   source: "deriv-live" | "disconnected";
@@ -35,6 +43,7 @@ function keyFromSymbol(symbol: string): string | null {
 }
 
 const stateMap = new Map<string, IndexState>();
+const candleMap = new Map<string, Candlestick[]>();
 const priceAt24hAgo = new Map<string, number>();
 
 for (const idx of INDICES) {
@@ -47,6 +56,7 @@ for (const idx of INDICES) {
     lastSpikeDirection: null,
     connected: false,
   });
+  candleMap.set(getKey(idx.type, idx.number), []);
 }
 
 let ws: any = null;
@@ -69,6 +79,31 @@ function createWebSocket(url: string): any {
   return new WebSocket(url);
 }
 
+const CANDLE_INTERVAL = 60; // 1 minute candles in seconds
+
+function updateCandle(key: string, price: number, timeMs: number) {
+  const candles = candleMap.get(key);
+  if (!candles) return;
+
+  const candleTime = Math.floor(timeMs / 1000 / CANDLE_INTERVAL) * CANDLE_INTERVAL;
+
+  if (candles.length === 0 || candles[candles.length - 1].time !== candleTime) {
+    candles.push({
+      time: candleTime,
+      open: price,
+      high: price,
+      low: price,
+      close: price,
+    });
+    if (candles.length > 200) candles.shift();
+  } else {
+    const last = candles[candles.length - 1];
+    last.high = Math.max(last.high, price);
+    last.low = Math.min(last.low, price);
+    last.close = price;
+  }
+}
+
 function onTick(symbol: string, quote: number, epoch: number) {
   const key = keyFromSymbol(symbol);
   if (!key) return;
@@ -89,6 +124,8 @@ function onTick(symbol: string, quote: number, epoch: number) {
   st.history.push(quote);
   st.timestamps.push(ts);
   st.connected = true;
+
+  updateCandle(key, quote, ts);
 
   if (st.history.length > 500) {
     st.history.shift();
@@ -484,4 +521,13 @@ export function predictNextTick(type: IndexType, num: number) {
     connected: st.connected,
     timestamp: Date.now(),
   };
+}
+
+export function getCandlesticks(type: IndexType, num: number): Candlestick[] {
+  return candleMap.get(getKey(type, num)) || [];
+}
+
+export function initDerivClient() {
+  if (typeof window === "undefined") return false;
+  return connectDerivWebSocket();
 }

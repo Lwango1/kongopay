@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { Zap, Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3, ArrowUpFromLine, ArrowDownFromLine, ExternalLink } from "lucide-react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3, ArrowUpFromLine, ArrowDownFromLine, ExternalLink } from "lucide-react";
+import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
+import type { Candlestick } from "@/lib/deriv";
+import { initDerivClient, getDerivState, predictSpike, getCandlesticks } from "@/lib/deriv";
+import type { IndexType } from "@/lib/deriv";
 
 interface IndexData {
   price: number;
@@ -36,7 +40,7 @@ interface SpikePrediction {
   connected: boolean;
 }
 
-const INDICES = [
+const INDICES: { type: IndexType; number: number; icon: any; color: string; label: string; symbol: string }[] = [
   { type: "BOOM", number: 500, icon: Flame, color: "#22c55e", label: "Boom 500", symbol: "BOOM500" },
   { type: "BOOM", number: 900, icon: Flame, color: "#16a34a", label: "Boom 900", symbol: "BOOM900" },
   { type: "BOOM", number: 1000, icon: Flame, color: "#15803d", label: "Boom 1000", symbol: "BOOM1000" },
@@ -51,38 +55,117 @@ export default function PredictionGame() {
   const [state, setState] = useState<Record<string, IndexData> | null>(null);
   const [spike, setSpike] = useState<SpikePrediction | null>(null);
   const [activeKey, setActiveKey] = useState("BOOM_500");
+  const [connected, setConnected] = useState(false);
+  const [candles, setCandles] = useState<Candlestick[]>([]);
 
-  const fetchState = useCallback(async () => {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartApiRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick", any> | null>(null);
+
+  const activeIdx = INDICES.find((i) => `${i.type}_${i.number}` === activeKey);
+  const price = state?.[activeKey]?.price ?? 0;
+  const change = state?.[activeKey]?.change24h ?? 0;
+
+  const fetchState = useCallback(() => {
     try {
-      const [stateRes, spikeRes] = await Promise.all([
-        fetch("/api/deriv/state"),
-        fetch(`/api/deriv/spike?${activeKey.replace("_", "&number=").replace("BOOM", "type=BOOM").replace("CRASH", "type=CRASH")}`),
-      ]);
-      if (stateRes.ok) setState(await stateRes.json());
-      if (spikeRes.ok) {
-        const data = await spikeRes.json();
-        setSpike(data.prediction);
+      const derivState = getDerivState();
+      const isConnected = derivState.source === "deriv-live";
+      setConnected(isConnected);
+      if (isConnected) {
+        setState(derivState as unknown as Record<string, IndexData>);
+        const parts = activeKey.split("_");
+        const type = parts[0] as IndexType;
+        const num = parseInt(parts[1]);
+        const pred = predictSpike(type, num);
+        if (pred && !("error" in pred)) {
+          setSpike(pred as unknown as SpikePrediction);
+        }
+        const candlestickData = getCandlesticks(type, num);
+        setCandles([...candlestickData]);
       }
     } catch { /* ignore */ }
   }, [activeKey]);
 
   useEffect(() => {
+    initDerivClient();
     fetchState();
     const interval = setInterval(fetchState, 1000);
     return () => clearInterval(interval);
   }, [fetchState]);
 
-  const activeIdx = INDICES.find((i) => `${i.type}_${i.number}` === activeKey);
-  const currentIdxData = state?.[activeKey];
-  const price = currentIdxData?.price ?? 0;
-  const change = currentIdxData?.change24h ?? 0;
-  const history = currentIdxData?.history ?? [];
-  const minH = Math.min(...history, 0);
-  const maxH = Math.max(...history, 1);
-  const range = maxH - minH || 1;
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    const chart = createChart(chartRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: "#a0aec0",
+      },
+      grid: {
+        vertLines: { color: "#2d3748" },
+        horzLines: { color: "#2d3748" },
+      },
+      width: chartRef.current.clientWidth,
+      height: 320,
+      crosshair: {
+        mode: CrosshairMode.Normal,
+      },
+      timeScale: {
+        borderColor: "#2d3748",
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      rightPriceScale: {
+        borderColor: "#2d3748",
+      },
+    });
+
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderUpColor: "#22c55e",
+      borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+    });
+
+    chartApiRef.current = chart;
+    seriesRef.current = series;
+
+    const handleResize = () => {
+      if (chartRef.current) {
+        chart.applyOptions({ width: chartRef.current.clientWidth });
+      }
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      chart.remove();
+      chartApiRef.current = null;
+      seriesRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (seriesRef.current && candles.length > 0) {
+      seriesRef.current.setData(candles.map(c => ({
+        time: c.time as any,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      })));
+    }
+  }, [candles]);
+
+  useEffect(() => {
+    if (chartApiRef.current && chartRef.current) {
+      chartApiRef.current.applyOptions({ width: chartRef.current.clientWidth });
+    }
+  }, [activeKey]);
 
   const spikeColor = spike?.isSpikeImminent ? "#ef4444" : spike && spike.spikeProbability > 50 ? "#f59e0b" : "#22c55e";
-
   const hasSupport = spike?.sRlevels?.some(l => l.type === "support") ?? false;
   const hasResistance = spike?.sRlevels?.some(l => l.type === "resistance") ?? false;
 
@@ -121,36 +204,31 @@ export default function PredictionGame() {
 
           <div className="lg:col-span-3 space-y-4">
             <div className="rounded-xl border border-border bg-surface p-4">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   {activeIdx && <activeIdx.icon size={20} style={{ color: activeIdx.color }} />}
                   <span className="font-semibold">{activeIdx?.label ?? "Select"}</span>
                 </div>
-                <span className={`text-sm font-mono ${change >= 0 ? "text-success" : "text-danger"}`}>
-                  {change >= 0 ? "+" : ""}{change.toFixed(2)}%
-                </span>
-              </div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-3xl font-bold font-mono">
-                  ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <div className="flex items-center gap-3">
+                  <a href={`${DERIV_URL}?symbol=${activeIdx?.symbol}`} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-lg bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all">
+                    <ExternalLink size={12} />
+                    Deriv
+                  </a>
+                  <span className={`text-xs font-mono ${change >= 0 ? "text-success" : "text-danger"}`}>
+                    {change >= 0 ? "+" : ""}{change.toFixed(2)}%
+                  </span>
                 </div>
-                <a href={`${DERIV_URL}?symbol=${activeIdx?.symbol}`} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all">
-                  <ExternalLink size={14} />
-                  Comparez sur Deriv
-                </a>
               </div>
-              <div className="h-40 flex items-end gap-[2px]">
-                {history.slice(-80).map((p, i) => (
-                  <div key={i} className="flex-1 rounded-t-sm transition-all"
-                    style={{
-                      height: `${((p - minH) / range) * 100}%`,
-                      background: activeIdx?.type === "BOOM"
-                        ? `rgba(34, 197, 94, ${0.3 + (p / maxH) * 0.5})`
-                        : `rgba(251, 113, 133, ${0.3 + (p / maxH) * 0.5})`,
-                    }} />
-                ))}
+
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-2xl font-bold font-mono">
+                  ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {!connected && <span className="text-xs text-text-muted font-normal ml-2">(déconnecté)</span>}
+                </div>
               </div>
+
+              <div ref={chartRef} className="w-full" />
             </div>
 
             {spike && (
@@ -274,7 +352,7 @@ export default function PredictionGame() {
               </>
             )}
 
-            {!spike?.connected && (
+            {!connected && (
               <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-4 text-center text-sm text-text-secondary">
                 <AlertTriangle size={16} className="inline mr-2 text-warning" />
                 Connexion WebSocket en cours... Données non disponibles.
