@@ -249,75 +249,146 @@ export function getDerivState(): DerivSnapshot {
   return result;
 }
 
-function findSwingLevels(prices: number[]): { lastSwingHigh: number; lastSwingLow: number; swingHighIndex: number; swingLowIndex: number } {
-  const lookback = prices.slice(-60);
-  const swingHighs: { price: number; index: number }[] = [];
-  const swingLows: { price: number; index: number }[] = [];
+const CLUSTER_TOLERANCE = 0.003; // 0.3% clustering threshold for S/R levels
 
+interface SRLevel {
+  price: number;
+  strength: number; // number of touches
+  type: "support" | "resistance";
+}
+
+function findSupportResistance(prices: number[], currentPrice: number): {
+  nearestSupport: SRLevel | null;
+  nearestResistance: SRLevel | null;
+  allLevels: SRLevel[];
+} {
+  const lookback = prices.slice(-120);
+
+  // Step 1: Find all pivot highs and pivot lows
+  const pivots: { price: number; isHigh: boolean }[] = [];
   for (let i = 2; i < lookback.length - 2; i++) {
-    const prev2 = lookback[i - 2];
-    const prev1 = lookback[i - 1];
     const curr = lookback[i];
+    const prev1 = lookback[i - 1];
+    const prev2 = lookback[i - 2];
     const next1 = lookback[i + 1];
     const next2 = lookback[i + 2];
 
-    if (curr > prev1 && curr > prev2 && curr > next1 && curr > next2) {
-      swingHighs.push({ price: curr, index: i });
-    }
-    if (curr < prev1 && curr < prev2 && curr < next1 && curr < next2) {
-      swingLows.push({ price: curr, index: i });
+    const isPivotHigh = curr > prev1 && curr > prev2 && curr > next1 && curr > next2;
+    const isPivotLow = curr < prev1 && curr < prev2 && curr < next1 && curr < next2;
+
+    if (isPivotHigh) pivots.push({ price: curr, isHigh: true });
+    if (isPivotLow) pivots.push({ price: curr, isHigh: false });
+  }
+
+  if (pivots.length === 0) return { nearestSupport: null, nearestResistance: null, allLevels: [] };
+
+  // Step 2: Cluster nearby pivots into zones
+  const clusters: { avgPrice: number; touches: number; isHigh: boolean }[] = [];
+
+  for (const pivot of pivots) {
+    const existing = clusters.find(
+      c => Math.abs(c.avgPrice - pivot.price) / pivot.price < CLUSTER_TOLERANCE && c.isHigh === pivot.isHigh
+    );
+    if (existing) {
+      existing.avgPrice = (existing.avgPrice * existing.touches + pivot.price) / (existing.touches + 1);
+      existing.touches++;
+    } else {
+      clusters.push({ avgPrice: pivot.price, touches: 1, isHigh: pivot.isHigh });
     }
   }
 
-  const lastSwingHigh = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].price : Math.max(...lookback);
-  const lastSwingLow = swingLows.length > 0 ? swingLows[swingLows.length - 1].price : Math.min(...lookback);
-  const swingHighIndex = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].index : 0;
-  const swingLowIndex = swingLows.length > 0 ? swingLows[swingLows.length - 1].index : 0;
+  // Step 3: Classify each cluster as support or resistance relative to current price
+  const supports: SRLevel[] = clusters
+    .filter(c => c.avgPrice < currentPrice)
+    .map(c => ({ price: c.avgPrice, strength: c.touches, type: "support" as const }));
 
-  return { lastSwingHigh, lastSwingLow, swingHighIndex, swingLowIndex };
+  const resistances: SRLevel[] = clusters
+    .filter(c => c.avgPrice > currentPrice)
+    .map(c => ({ price: c.avgPrice, strength: c.touches, type: "resistance" as const }));
+
+  // Sort: nearest first
+  supports.sort((a, b) => b.price - a.price);
+  resistances.sort((a, b) => a.price - b.price);
+
+  // Step 4: Find the strongest of the nearest levels (weight proximity vs strength)
+  const scoreLevel = (level: SRLevel): number => {
+    const distPct = Math.abs(level.price - currentPrice) / currentPrice;
+    const distScore = Math.max(0, 1 - distPct / 0.02); // 2% max distance
+    return distScore * 0.4 + (level.strength / 10) * 0.6;
+  };
+
+  supports.sort((a, b) => scoreLevel(b) - scoreLevel(a));
+  resistances.sort((a, b) => scoreLevel(b) - scoreLevel(a));
+
+  const allLevels = [...supports, ...resistances].sort((a, b) => b.strength - a.strength);
+
+  return {
+    nearestSupport: supports.length > 0 ? supports[0] : null,
+    nearestResistance: resistances.length > 0 ? resistances[0] : null,
+    allLevels,
+  };
 }
 
 export function predictSpike(type: IndexType, num: number) {
   const key = getKey(type, num);
   const st = stateMap.get(key);
-  if (!st || st.history.length < 15) {
+  if (!st || st.history.length < 20) {
     return { error: "Pas assez de données historiques" };
   }
 
   const history = st.history;
-  const { lastSwingHigh, lastSwingLow, swingHighIndex, swingLowIndex } = findSwingLevels(history);
-
   const currentPrice = st.price;
-  const swingRange = lastSwingHigh - lastSwingLow || 1;
+  const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
 
   let extremeFactor: number;
   let expectedDirection: string;
-  let referenceLevel: number;
+  let referenceLevel: number | null;
+  let referenceStrength: number;
   let distanceToLevel: number;
 
   if (type === "BOOM") {
-    referenceLevel = lastSwingLow;
-    distanceToLevel = Math.abs(currentPrice - lastSwingLow);
-    const maxDistance = swingRange || currentPrice * 0.02;
+    // Boom: spike UP when price touches a strong support (oversold)
+    referenceLevel = nearestSupport?.price ?? null;
+    referenceStrength = nearestSupport?.strength ?? 0;
+
+    if (referenceLevel === null) {
+      // Fallback: use min of last 20 candles
+      const recentMin = Math.min(...history.slice(-20));
+      referenceLevel = recentMin;
+      referenceStrength = 1;
+    }
+
+    distanceToLevel = Math.abs(currentPrice - referenceLevel);
+    const maxDistance = referenceLevel * 0.015;
     const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
     extremeFactor = Math.min(proximity, 1);
     expectedDirection = "up";
 
-    // If price already broke below the swing low, reduce probability
-    if (currentPrice < lastSwingLow) {
-      extremeFactor = Math.max(0, extremeFactor * 0.3);
+    // If price broke below support, reduce confidence
+    if (currentPrice < referenceLevel) {
+      extremeFactor = Math.max(0, extremeFactor * 0.2);
     }
   } else {
-    referenceLevel = lastSwingHigh;
-    distanceToLevel = Math.abs(currentPrice - lastSwingHigh);
-    const maxDistance = swingRange || currentPrice * 0.02;
+    // Crash: spike DOWN when price touches a strong resistance (overbought)
+    referenceLevel = nearestResistance?.price ?? null;
+    referenceStrength = nearestResistance?.strength ?? 0;
+
+    if (referenceLevel === null) {
+      // Fallback: use max of last 20 candles
+      const recentMax = Math.max(...history.slice(-20));
+      referenceLevel = recentMax;
+      referenceStrength = 1;
+    }
+
+    distanceToLevel = Math.abs(currentPrice - referenceLevel);
+    const maxDistance = referenceLevel * 0.015;
     const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
     extremeFactor = Math.min(proximity, 1);
     expectedDirection = "down";
 
-    // If price already broke above the swing high, reduce probability
-    if (currentPrice > lastSwingHigh) {
-      extremeFactor = Math.max(0, extremeFactor * 0.3);
+    // If price broke above resistance, reduce confidence
+    if (currentPrice > referenceLevel) {
+      extremeFactor = Math.max(0, extremeFactor * 0.2);
     }
   }
 
@@ -328,9 +399,12 @@ export function predictSpike(type: IndexType, num: number) {
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
 
-  const spikeProbability = Math.min((extremeFactor * 0.6 + momentumFactor * 0.25 + timeFactor * 0.15) * 100, 95);
+  const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.15;
+  const spikeProbability = Math.min((extremeFactor * 0.55 + momentumFactor * 0.2 + timeFactor * 0.1 + strengthBonus) * 100, 95);
   const volatilityFactor = 1000 / num;
   const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * volatilityFactor * 100).toFixed(1);
+
+  const sRrange = (nearestResistance?.price ?? currentPrice * 1.02) - (nearestSupport?.price ?? currentPrice * 0.98);
 
   return {
     type,
@@ -341,12 +415,20 @@ export function predictSpike(type: IndexType, num: number) {
     estimatedMagnitude: `${estimatedMagnitude}%`,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
     isSpikeImminent: spikeProbability > 70,
-    pricePosition: Math.round(((currentPrice - lastSwingLow) / swingRange) * 100),
+    pricePosition: nearestSupport && nearestResistance
+      ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
+      : 50,
     consecutiveMoves: consecutive,
-    rangeLow: lastSwingLow,
-    rangeHigh: lastSwingHigh,
+    rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
+    rangeHigh: nearestResistance?.price ?? currentPrice * 1.02,
     referenceLevel,
-    distancePercent: Math.round((distanceToLevel / (swingRange || currentPrice)) * 100),
+    referenceStrength,
+    distancePercent: Math.round((distanceToLevel / (referenceLevel || currentPrice)) * 10000) / 100,
+    sRlevels: allLevels.slice(0, 6).map(l => ({
+      price: Math.round(l.price * 100) / 100,
+      strength: l.strength,
+      type: l.type,
+    })),
     connected: st.connected,
     timestamp: Date.now(),
   };

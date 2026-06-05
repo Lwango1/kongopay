@@ -21,6 +21,12 @@ interface IndexData {
   connected: boolean;
 }
 
+interface SRLevel {
+  price: number;
+  strength: number;
+  type: "support" | "resistance";
+}
+
 interface SpikePrediction {
   spikeProbability: number;
   expectedDirection: string;
@@ -29,8 +35,10 @@ interface SpikePrediction {
   isSpikeImminent: boolean;
   pricePosition: number;
   referenceLevel?: number;
+  referenceStrength?: number;
   distancePercent?: number;
   consecutiveMoves?: number;
+  sRlevels?: SRLevel[];
   error?: string;
 }
 
@@ -277,7 +285,27 @@ export default function DerivChart() {
                 {spikes[expanded].consecutiveMoves !== undefined && (
                   <div className="mt-2 text-[10px] text-text-muted">
                     Mouvements consécutifs opposés : {spikes[expanded].consecutiveMoves}/5 • 
-                    Distance: {spikes[expanded].distancePercent ?? 0}%
+                    Distance du niveau : {spikes[expanded].distancePercent ?? 0}% • 
+                    Force S/R : {spikes[expanded].referenceStrength ?? 0} touches
+                  </div>
+                )}
+                {spikes[expanded].sRlevels && spikes[expanded].sRlevels.length > 0 && (
+                  <div className="mt-3">
+                    <div className="text-[10px] font-semibold text-text-muted uppercase mb-1.5">Niveaux S/R détectés</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {spikes[expanded].sRlevels.map((level: SRLevel, i: number) => (
+                        <span key={i}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium
+                            ${level.type === "support"
+                              ? "bg-success/10 text-success border border-success/20"
+                              : "bg-danger/10 text-danger border border-danger/20"}`}
+                        >
+                          <span className={`w-1 h-1 rounded-full ${level.type === "support" ? "bg-success" : "bg-danger"}`} />
+                          ${level.price.toLocaleString(undefined, { minimumFractionDigits: 1 })}
+                          <span className="opacity-60">x{level.strength}</span>
+                        </span>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

@@ -214,73 +214,121 @@ class DerivLiveService {
     return result;
   }
 
-  findSwingLevels(prices) {
-    const lookback = prices.slice(-60);
-    const swingHighs = [];
-    const swingLows = [];
+  CLUSTER_TOLERANCE: 0.003;
+
+  findSupportResistance(prices, currentPrice) {
+    const lookback = prices.slice(-120);
+    const pivots = [];
 
     for (let i = 2; i < lookback.length - 2; i++) {
-      const prev2 = lookback[i - 2];
-      const prev1 = lookback[i - 1];
       const curr = lookback[i];
+      const prev1 = lookback[i - 1];
+      const prev2 = lookback[i - 2];
       const next1 = lookback[i + 1];
       const next2 = lookback[i + 2];
 
       if (curr > prev1 && curr > prev2 && curr > next1 && curr > next2) {
-        swingHighs.push({ price: curr, index: i });
+        pivots.push({ price: curr, isHigh: true });
       }
       if (curr < prev1 && curr < prev2 && curr < next1 && curr < next2) {
-        swingLows.push({ price: curr, index: i });
+        pivots.push({ price: curr, isHigh: false });
       }
     }
 
-    const lastSwingHigh = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].price : Math.max(...lookback);
-    const lastSwingLow = swingLows.length > 0 ? swingLows[swingLows.length - 1].price : Math.min(...lookback);
-    const swingHighIndex = swingHighs.length > 0 ? swingHighs[swingHighs.length - 1].index : 0;
-    const swingLowIndex = swingLows.length > 0 ? swingLows[swingLows.length - 1].index : 0;
+    if (pivots.length === 0) return { nearestSupport: null, nearestResistance: null, allLevels: [] };
 
-    return { lastSwingHigh, lastSwingLow, swingHighIndex, swingLowIndex };
+    const clusters = [];
+    for (const pivot of pivots) {
+      const existing = clusters.find(
+        c => Math.abs(c.avgPrice - pivot.price) / pivot.price < this.CLUSTER_TOLERANCE && c.isHigh === pivot.isHigh
+      );
+      if (existing) {
+        existing.avgPrice = (existing.avgPrice * existing.touches + pivot.price) / (existing.touches + 1);
+        existing.touches++;
+      } else {
+        clusters.push({ avgPrice: pivot.price, touches: 1, isHigh: pivot.isHigh });
+      }
+    }
+
+    const supports = clusters
+      .filter(c => c.avgPrice < currentPrice)
+      .map(c => ({ price: c.avgPrice, strength: c.touches, type: 'support' }));
+
+    const resistances = clusters
+      .filter(c => c.avgPrice > currentPrice)
+      .map(c => ({ price: c.avgPrice, strength: c.touches, type: 'resistance' }));
+
+    supports.sort((a, b) => b.price - a.price);
+    resistances.sort((a, b) => a.price - b.price);
+
+    const scoreLevel = (level) => {
+      const distPct = Math.abs(level.price - currentPrice) / currentPrice;
+      const distScore = Math.max(0, 1 - distPct / 0.02);
+      return distScore * 0.4 + (level.strength / 10) * 0.6;
+    };
+
+    supports.sort((a, b) => scoreLevel(b) - scoreLevel(a));
+    resistances.sort((a, b) => scoreLevel(b) - scoreLevel(a));
+
+    return {
+      nearestSupport: supports.length > 0 ? supports[0] : null,
+      nearestResistance: resistances.length > 0 ? resistances[0] : null,
+      allLevels: [...supports, ...resistances].sort((a, b) => b.strength - a.strength),
+    };
   }
 
   predictSpike(type, num) {
     const key = getKey(type, num);
     const st = this.stateMap.get(key);
-    if (!st || st.history.length < 15) {
+    if (!st || st.history.length < 20) {
       return { error: 'Pas assez de données historiques', connected: st?.connected ?? false };
     }
 
     const history = st.history;
-    const { lastSwingHigh, lastSwingLow } = this.findSwingLevels(history);
-
     const currentPrice = st.price;
-    const swingRange = lastSwingHigh - lastSwingLow || 1;
+    const { nearestSupport, nearestResistance, allLevels } = this.findSupportResistance(history, currentPrice);
 
     let extremeFactor;
     let expectedDirection;
     let referenceLevel;
+    let referenceStrength;
     let distanceToLevel;
 
     if (type === 'BOOM') {
-      referenceLevel = lastSwingLow;
-      distanceToLevel = Math.abs(currentPrice - lastSwingLow);
-      const maxDistance = swingRange || currentPrice * 0.02;
+      referenceLevel = nearestSupport?.price ?? null;
+      referenceStrength = nearestSupport?.strength ?? 0;
+
+      if (referenceLevel === null) {
+        referenceLevel = Math.min(...history.slice(-20));
+        referenceStrength = 1;
+      }
+
+      distanceToLevel = Math.abs(currentPrice - referenceLevel);
+      const maxDistance = referenceLevel * 0.015;
       const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
       extremeFactor = Math.min(proximity, 1);
       expectedDirection = 'up';
 
-      if (currentPrice < lastSwingLow) {
-        extremeFactor = Math.max(0, extremeFactor * 0.3);
+      if (currentPrice < referenceLevel) {
+        extremeFactor = Math.max(0, extremeFactor * 0.2);
       }
     } else {
-      referenceLevel = lastSwingHigh;
-      distanceToLevel = Math.abs(currentPrice - lastSwingHigh);
-      const maxDistance = swingRange || currentPrice * 0.02;
+      referenceLevel = nearestResistance?.price ?? null;
+      referenceStrength = nearestResistance?.strength ?? 0;
+
+      if (referenceLevel === null) {
+        referenceLevel = Math.max(...history.slice(-20));
+        referenceStrength = 1;
+      }
+
+      distanceToLevel = Math.abs(currentPrice - referenceLevel);
+      const maxDistance = referenceLevel * 0.015;
       const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
       extremeFactor = Math.min(proximity, 1);
       expectedDirection = 'down';
 
-      if (currentPrice > lastSwingHigh) {
-        extremeFactor = Math.max(0, extremeFactor * 0.3);
+      if (currentPrice > referenceLevel) {
+        extremeFactor = Math.max(0, extremeFactor * 0.2);
       }
     }
 
@@ -291,7 +339,8 @@ class DerivLiveService {
     const msSinceLastSpike = Date.now() - st.lastSpikeTime;
     const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
 
-    const spikeProbability = Math.min((extremeFactor * 0.6 + momentumFactor * 0.25 + timeFactor * 0.15) * 100, 95);
+    const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.15;
+    const spikeProbability = Math.min((extremeFactor * 0.55 + momentumFactor * 0.2 + timeFactor * 0.1 + strengthBonus) * 100, 95);
     const volatilityFactor = 1000 / num;
     const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * volatilityFactor * 100).toFixed(1);
 
@@ -304,12 +353,20 @@ class DerivLiveService {
       estimatedMagnitude: `${estimatedMagnitude}%`,
       timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
       isSpikeImminent: spikeProbability > 70,
-      pricePosition: Math.round(((currentPrice - lastSwingLow) / swingRange) * 100),
+      pricePosition: nearestSupport && nearestResistance
+        ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
+        : 50,
       consecutiveMoves: consecutive,
-      rangeLow: lastSwingLow,
-      rangeHigh: lastSwingHigh,
+      rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
+      rangeHigh: nearestResistance?.price ?? currentPrice * 1.02,
       referenceLevel,
-      distancePercent: Math.round((distanceToLevel / (swingRange || currentPrice)) * 100),
+      referenceStrength,
+      distancePercent: Math.round((distanceToLevel / (referenceLevel || currentPrice)) * 10000) / 100,
+      sRlevels: allLevels.slice(0, 6).map(l => ({
+        price: Math.round(l.price * 100) / 100,
+        strength: l.strength,
+        type: l.type,
+      })),
       connected: st.connected,
       timestamp: Date.now(),
     };
