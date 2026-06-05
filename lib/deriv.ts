@@ -53,7 +53,10 @@ let ws: WebSocket | null = null;
 let wsConnected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let historyLoaded = false;
-const DERIV_APP_ID = process.env.NEXT_PUBLIC_DERIV_APP_ID || process.env.DERIV_APP_ID || "";
+const DERIV_TOKEN = process.env.NEXT_PUBLIC_DERIV_TOKEN || "";
+const DERIV_WS_URL = DERIV_TOKEN
+  ? `wss://api.derivws.com/trading/v1/options/ws/real?otp=${DERIV_TOKEN}`
+  : "wss://api.derivws.com/trading/v1/options/ws/public";
 
 function onTick(symbol: string, quote: number, epoch: number) {
   const key = keyFromSymbol(symbol);
@@ -139,24 +142,17 @@ function subscribeAll() {
 
 export function connectDerivWebSocket(): boolean {
   if (wsConnected) return true;
-  if (!DERIV_APP_ID) {
-    if (typeof window !== "undefined") {
-      console.warn("[Deriv] DERIV_APP_ID not set. Set NEXT_PUBLIC_DERIV_APP_ID in .env.local");
-      console.warn("[Deriv] Get your app_id: https://app.deriv.com/account/api-token");
-    }
-    return false;
-  }
+  if (!DERIV_WS_URL) return false;
 
   try {
-    const url = `wss://ws.deriv.com/websockets/v3?app_id=${DERIV_APP_ID}`;
-    ws = new WebSocket(url);
+    ws = new WebSocket(DERIV_WS_URL);
 
     ws.onopen = () => {
       wsConnected = true;
       historyLoaded = false;
       subscribeAll();
       if (typeof window !== "undefined") {
-        console.log(`[Deriv] Connected to ws.deriv.com (app_id: ${DERIV_APP_ID})`);
+        console.log(`[Deriv] Connected to ${DERIV_WS_URL.split("?")[0]}${DERIV_TOKEN ? " (authentifié)" : ""}`);
       }
     };
 
@@ -172,11 +168,9 @@ export function connectDerivWebSocket(): boolean {
       for (const st of stateMap.values()) {
         st.connected = false;
       }
-      if (DERIV_APP_ID) {
-        reconnectTimer = setTimeout(() => {
-          connectDerivWebSocket();
-        }, 3000);
-      }
+      reconnectTimer = setTimeout(() => {
+        connectDerivWebSocket();
+      }, 3000);
     };
 
     ws.onerror = () => {

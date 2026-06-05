@@ -219,11 +219,9 @@ export default function DerivChart() {
 
         {appIdMissing && (
           <div className="mb-6 p-4 rounded-xl border border-warning/30 bg-warning/5">
-            <p className="text-sm text-warning font-semibold mb-1">Clé API Deriv manquante</p>
+            <p className="text-sm text-warning font-semibold mb-1">Token Deriv manquant</p>
             <p className="text-xs text-text-secondary">
-              Ajoutez <code className="px-1 py-0.5 bg-surface-light rounded text-xs">NEXT_PUBLIC_DERIV_APP_ID=votre_app_id</code> dans le fichier <code className="px-1 py-0.5 bg-surface-light rounded text-xs">.env.local</code> à la racine du projet.
-              Obtenez un app_id gratuit sur{" "}
-              <a href="https://app.deriv.com/account/api-token" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">app.deriv.com</a>.
+              Ajoutez <code className="px-1 py-0.5 bg-surface-light rounded text-xs">NEXT_PUBLIC_DERIV_TOKEN=votre_token</code> dans <code className="px-1 py-0.5 bg-surface-light rounded text-xs">.env.local</code>.
             </p>
           </div>
         )}
