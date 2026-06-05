@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import LoginScreen from '../screens/LoginScreen';
 import WalletScreen from '../screens/WalletScreen';
 import TradingScreen from '../screens/TradingScreen';
+import DerivScreen from '../screens/DerivScreen';
 import DepositScreen from '../screens/DepositScreen';
 import AdminScreen from '../screens/AdminScreen';
 import { COLORS } from '../constants/theme';
@@ -19,6 +20,7 @@ export type RootStackParamList = {
 export type BottomTabParamList = {
   WalletTab: undefined;
   TradingTab: undefined;
+  DerivTab: undefined;
   DepositTab: undefined;
   AdminTab: undefined;
 };
@@ -58,6 +60,15 @@ function MainTabs() {
           title: 'Trading',
           tabBarIcon: () => <TabIcon icon="📈" />,
           headerTitle: 'Marché',
+        }}
+      />
+      <Tab.Screen
+        name="DerivTab"
+        component={DerivScreen}
+        options={{
+          title: 'Boom & Crash',
+          tabBarIcon: () => <TabIcon icon="📊" />,
+          headerTitle: 'Indices Synthétiques',
         }}
       />
       <Tab.Screen

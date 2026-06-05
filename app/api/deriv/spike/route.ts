@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { predictSpike, getSpikeHistory } from "@/lib/deriv";
+import { predictSpike } from "@/lib/deriv";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,6 @@ export async function GET(req: NextRequest) {
   const num = parseInt(req.nextUrl.searchParams.get("number") || "500");
 
   const prediction = predictSpike(type, num);
-  const history = getSpikeHistory(type, num);
 
-  return NextResponse.json({ prediction, history });
+  return NextResponse.json({ prediction });
 }

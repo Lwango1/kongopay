@@ -5,11 +5,13 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import { initializeFirebase } from './config/firebase.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { derivService } from './services/deriv.js';
 import authRoutes from './routes/auth.js';
 import walletRoutes from './routes/wallet.js';
 import tradingRoutes from './routes/trading.js';
 import adminRoutes from './routes/admin.js';
 import mobileMoneyRoutes from './routes/mobileMoney.js';
+import derivRoutes from './routes/deriv.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +28,7 @@ app.use('/api/wallet', walletRoutes);
 app.use('/api/trading', tradingRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/mobile-money', mobileMoneyRoutes);
+app.use('/api/deriv', derivRoutes);
 
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', version: '2.0.0', name: 'KongoPay API' });
@@ -35,4 +38,5 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`KongoPay API running on port ${PORT}`);
+  derivService.connect();
 });
