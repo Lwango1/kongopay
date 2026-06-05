@@ -316,6 +316,68 @@ interface SRLevel {
   type: "support" | "resistance";
 }
 
+interface OrderBlock {
+  price: number;
+  type: "bullish" | "bearish";
+  strength: number;
+  rangeLow: number;
+  rangeHigh: number;
+}
+
+function findOrderBlocks(prices: number[]): OrderBlock[] {
+  const blocks: OrderBlock[] = [];
+  const lookback = prices.slice(-200);
+  if (lookback.length < 20) return blocks;
+
+  const bodyThreshold = 0.001; // minimum body size relative to price
+
+  for (let i = 5; i < lookback.length - 5; i++) {
+    const candle = lookback[i];
+    const prevCandle = lookback[i - 1];
+    const next1 = lookback[i + 1];
+    const next2 = lookback[i + 2];
+    const next3 = lookback[i + 3];
+
+    const change = candle - prevCandle;
+    const bodySize = Math.abs(change) / candle;
+
+    if (bodySize < bodyThreshold) continue;
+
+    // Bullish order block: strong bearish candle followed by at least 2 up moves
+    if (change < 0 && next1 > candle && next2 > next1) {
+      const rangeLow = Math.min(candle, prevCandle);
+      const rangeHigh = Math.max(candle, prevCandle);
+      // Avoid duplicates
+      const existing = blocks.find(b =>
+        b.type === "bullish" && Math.abs(b.price - rangeLow) / (rangeLow || 1) < CLUSTER_TOLERANCE
+      );
+      if (existing) {
+        existing.strength++;
+        existing.price = (existing.price * (existing.strength - 1) + rangeLow) / existing.strength;
+      } else {
+        blocks.push({ price: rangeLow, type: "bullish", strength: 1, rangeLow, rangeHigh });
+      }
+    }
+
+    // Bearish order block: strong bullish candle followed by at least 2 down moves
+    if (change > 0 && next1 < candle && next2 < next1) {
+      const rangeLow = Math.min(candle, prevCandle);
+      const rangeHigh = Math.max(candle, prevCandle);
+      const existing = blocks.find(b =>
+        b.type === "bearish" && Math.abs(b.price - rangeHigh) / (rangeHigh || 1) < CLUSTER_TOLERANCE
+      );
+      if (existing) {
+        existing.strength++;
+        existing.price = (existing.price * (existing.strength - 1) + rangeHigh) / existing.strength;
+      } else {
+        blocks.push({ price: rangeHigh, type: "bearish", strength: 1, rangeLow, rangeHigh });
+      }
+    }
+  }
+
+  return blocks.sort((a, b) => b.strength - a.strength).slice(0, 6);
+}
+
 function findSupportResistance(prices: number[], currentPrice: number): {
   nearestSupport: SRLevel | null;
   nearestResistance: SRLevel | null;
@@ -416,6 +478,33 @@ function scoreDirection(
   return { score, referenceLevel: refLevel, referenceStrength: refStrength, distancePct: distance / (refLevel || currentPrice) * 100, consecutive };
 }
 
+function scoreOB(
+  currentPrice: number, blocks: OrderBlock[], isUp: boolean
+): { score: number; level: number; strength: number } {
+  const relevant = blocks.filter(b => b.type === (isUp ? "bullish" : "bearish"));
+  if (relevant.length === 0) return { score: 0, level: currentPrice, strength: 0 };
+
+  let bestScore = 0;
+  let bestLevel = currentPrice;
+  let bestStrength = 0;
+
+  for (const ob of relevant) {
+    const distance = Math.abs(currentPrice - ob.price);
+    const maxDist = ob.price * 0.02;
+    const proximity = Math.max(0, 1 - distance / maxDist);
+    const strengthFactor = Math.min(ob.strength / 3, 1);
+    const obScore = proximity * 0.6 + strengthFactor * 0.4;
+
+    if (obScore > bestScore) {
+      bestScore = obScore;
+      bestLevel = ob.price;
+      bestStrength = ob.strength;
+    }
+  }
+
+  return { score: bestScore, level: bestLevel, strength: bestStrength };
+}
+
 export function predictSpike(type: IndexType, num: number) {
   const key = getKey(type, num);
   const st = stateMap.get(key);
@@ -426,27 +515,39 @@ export function predictSpike(type: IndexType, num: number) {
   const history = st.history;
   const currentPrice = st.price;
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
+  const orderBlocks = findOrderBlocks(history);
 
-  const { nearestSupport: ns, nearestResistance: nr } = { nearestSupport, nearestResistance };
+  const ns = nearestSupport;
+  const nr = nearestResistance;
 
-  const up = scoreDirection(currentPrice, ns?.price ?? null, ns?.strength ?? 0, history, true);
-  const down = scoreDirection(currentPrice, nr?.price ?? null, nr?.strength ?? 0, history, false);
+  const upSR = scoreDirection(currentPrice, ns?.price ?? null, ns?.strength ?? 0, history, true);
+  const downSR = scoreDirection(currentPrice, nr?.price ?? null, nr?.strength ?? 0, history, false);
+  const upOB = scoreOB(currentPrice, orderBlocks, true);
+  const downOB = scoreOB(currentPrice, orderBlocks, false);
 
-  const isUp = up.score >= down.score;
-  const best = isUp ? up : down;
+  // Combine S/R and OB scores (70% S/R, 30% OB)
+  const upTotal = upSR.score * 0.7 + upOB.score * 0.3;
+  const downTotal = downSR.score * 0.7 + downOB.score * 0.3;
+
+  const isUp = upTotal >= downTotal;
+  const bestScore = isUp ? upTotal : downTotal;
+  const bestRef = isUp
+    ? (upOB.score > upSR.score * 0.5 ? { level: upOB.level, strength: upOB.strength } : { level: upSR.referenceLevel, strength: upSR.referenceStrength })
+    : (downOB.score > downSR.score * 0.5 ? { level: downOB.level, strength: downOB.strength } : { level: downSR.referenceLevel, strength: downSR.referenceStrength });
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
-  const probability = Math.min((best.score + timeFactor * 0.1) * 100, 95);
+  const probability = Math.min((bestScore + timeFactor * 0.1) * 100, 95);
 
   const volatilityFactor = 1000 / num;
-  const magnitude = ((0.015 + best.score * 0.05) * volatilityFactor * 100).toFixed(1);
+  const magnitude = ((0.015 + bestScore * 0.05) * volatilityFactor * 100).toFixed(1);
 
   const pricePos = ns && nr
     ? Math.round(((currentPrice - ns.price) / (nr.price - ns.price)) * 100)
     : 50;
 
   const expDir = isUp ? "up" : "down";
+  const bestConsecutive = isUp ? upSR.consecutive : downSR.consecutive;
 
   return {
     type,
@@ -458,19 +559,24 @@ export function predictSpike(type: IndexType, num: number) {
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
     isSpikeImminent: probability > 70,
     pricePosition: pricePos,
-    consecutiveMoves: best.consecutive,
+    consecutiveMoves: bestConsecutive,
     rangeLow: ns?.price ?? currentPrice * 0.98,
     rangeHigh: nr?.price ?? currentPrice * 1.02,
-    referenceLevel: best.referenceLevel,
-    referenceStrength: best.referenceStrength,
-    distancePercent: Math.round(best.distancePct * 100) / 100,
+    referenceLevel: bestRef.level,
+    referenceStrength: bestRef.strength,
+    distancePercent: Math.round(Math.abs(currentPrice - bestRef.level) / (bestRef.level || currentPrice) * 10000) / 100,
     sRlevels: allLevels.slice(0, 6).map(l => ({
       price: Math.round(l.price * 100) / 100,
       strength: l.strength,
       type: l.type,
     })),
-    upScore: Math.round(up.score * 100),
-    downScore: Math.round(down.score * 100),
+    orderBlocks: orderBlocks.slice(0, 4).map(ob => ({
+      price: Math.round(ob.price * 100) / 100,
+      type: ob.type,
+      strength: ob.strength,
+    })),
+    upScore: Math.round(upTotal * 100),
+    downScore: Math.round(downTotal * 100),
     connected: st.connected,
     timestamp: Date.now(),
   };

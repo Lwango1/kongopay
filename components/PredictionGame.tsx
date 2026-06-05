@@ -23,6 +23,12 @@ interface SRLevel {
   type: "support" | "resistance";
 }
 
+interface OBLevel {
+  price: number;
+  type: "bullish" | "bearish";
+  strength: number;
+}
+
 interface SpikePrediction {
   spikeProbability: number;
   expectedDirection: string;
@@ -37,6 +43,7 @@ interface SpikePrediction {
   referenceStrength: number;
   distancePercent: number;
   sRlevels: SRLevel[];
+  orderBlocks: OBLevel[];
   upScore: number;
   downScore: number;
   connected: boolean;
@@ -284,8 +291,8 @@ export default function PredictionGame() {
                     <p className="text-xs text-text-secondary leading-relaxed">
                       <span className="text-text-muted">Raisonnement : </span>
                       {spike.expectedDirection === "up"
-                        ? `Le prix est à ${spike.pricePosition}% du range S/R, proche du support (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} baisses consécutives signalent un épuisement → l'algorithme anticipe un rebond (hausse).`
-                        : `Le prix est à ${spike.pricePosition}% du range S/R, proche de la résistance (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} hausses consécutives signalent un essoufflement → l'algorithme anticipe un repli (baisse).`}
+                        ? `Le prix est à ${spike.pricePosition}% du range S/R, proche du support (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} baisses consécutives + ordres blocs haussiers → l'algorithme anticipe un rebond.`
+                        : `Le prix est à ${spike.pricePosition}% du range S/R, proche de la résistance (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} hausses consécutives + ordres blocs baissiers → l'algorithme anticipe un repli.`}
                     </p>
                   </div>
 
@@ -297,12 +304,42 @@ export default function PredictionGame() {
                   )}
                 </div>
 
+                {spike.orderBlocks && spike.orderBlocks.length > 0 && (
+                  <div className="rounded-xl border border-border bg-surface/50 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <BarChart3 size={14} className="text-primary" />
+                      <span className="font-semibold text-sm">Ordres Blocs</span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {spike.orderBlocks.map((ob, i) => {
+                        const isBullish = ob.type === "bullish";
+                        const obProx = Math.abs((ob.price - price) / price * 100);
+                        const isNear = obProx < 0.5;
+                        return (
+                          <div key={i} className={`flex items-center justify-between py-1.5 px-3 rounded-lg text-xs ${isNear ? "bg-primary/10 border border-primary/20" : "bg-background border border-border"}`}>
+                            <div className="flex items-center gap-2">
+                              <span className={`font-mono font-semibold ${isBullish ? "text-success" : "text-danger"}`}>
+                                ${ob.price.toFixed(2)}
+                              </span>
+                              <span className="text-text-muted">({isBullish ? "OB Hausse" : "OB Baisse"})</span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="text-text-muted">{ob.strength}x</span>
+                              {isNear && <span className="text-warning text-[10px] font-semibold">Proche</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {spike.sRlevels && spike.sRlevels.length > 0 && (
                   <div className="rounded-xl border border-border bg-surface/50 p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <ArrowUpFromLine size={14} className="text-success" />
                       <ArrowDownFromLine size={14} className="text-danger" />
-                      <span className="font-semibold text-sm">Niveaux Support & Résistance</span>
+                      <span className="font-semibold text-sm">Supports & Résistances</span>
                     </div>
                     <div className="space-y-1.5">
                       {spike.sRlevels.slice(0, 6).map((level, i) => {
