@@ -525,15 +525,15 @@ export function predictSpike(type: IndexType, num: number) {
   const upOB = scoreOB(currentPrice, orderBlocks, true);
   const downOB = scoreOB(currentPrice, orderBlocks, false);
 
-  // Combine S/R and OB scores (70% S/R, 30% OB)
-  const upTotal = upSR.score * 0.7 + upOB.score * 0.3;
-  const downTotal = downSR.score * 0.7 + downOB.score * 0.3;
+  // Combine S/R and OB scores (85% S/R, 15% OB)
+  const upTotal = upSR.score * 0.85 + upOB.score * 0.15;
+  const downTotal = downSR.score * 0.85 + downOB.score * 0.15;
 
   const isUp = upTotal >= downTotal;
   const bestScore = isUp ? upTotal : downTotal;
   const bestRef = isUp
-    ? (upOB.score > upSR.score * 0.5 ? { level: upOB.level, strength: upOB.strength } : { level: upSR.referenceLevel, strength: upSR.referenceStrength })
-    : (downOB.score > downSR.score * 0.5 ? { level: downOB.level, strength: downOB.strength } : { level: downSR.referenceLevel, strength: downSR.referenceStrength });
+    ? (upOB.score > upSR.score * 0.3 ? { level: upOB.level, strength: upOB.strength } : { level: upSR.referenceLevel, strength: upSR.referenceStrength })
+    : (downOB.score > downSR.score * 0.3 ? { level: downOB.level, strength: downOB.strength } : { level: downSR.referenceLevel, strength: downSR.referenceStrength });
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
