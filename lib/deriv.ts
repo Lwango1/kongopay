@@ -388,6 +388,34 @@ function findSupportResistance(prices: number[], currentPrice: number): {
   };
 }
 
+function scoreDirection(
+  currentPrice: number, level: number | null, strength: number,
+  history: number[], isUp: boolean
+): { score: number; referenceLevel: number; referenceStrength: number; distancePct: number; consecutive: number } {
+  const refLevel = level ?? (isUp
+    ? Math.min(...history.slice(-20))
+    : Math.max(...history.slice(-20))
+  );
+  const refStrength = level ? strength : 1;
+
+  const distance = Math.abs(currentPrice - refLevel);
+  const maxDist = refLevel * 0.015;
+  const proximity = Math.max(0, 1 - distance / maxDist);
+  const extreme = Math.min(proximity, 1);
+
+  const broke = isUp ? currentPrice < refLevel : currentPrice > refLevel;
+  const effectiveExtreme = broke ? extreme * 0.2 : extreme;
+
+  const recentMoves = history.slice(-15).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
+  const consecutive = recentMoves.slice(-5).filter(m => isUp ? m < 0 : m > 0).length;
+  const momentum = Math.min(consecutive / 5, 1);
+
+  const strengthBonus = Math.min(refStrength / 5, 1) * 0.15;
+
+  const score = effectiveExtreme * 0.55 + momentum * 0.2 + strengthBonus;
+  return { score, referenceLevel: refLevel, referenceStrength: refStrength, distancePct: distance / (refLevel || currentPrice) * 100, consecutive };
+}
+
 export function predictSpike(type: IndexType, num: number) {
   const key = getKey(type, num);
   const st = stateMap.get(key);
@@ -399,95 +427,50 @@ export function predictSpike(type: IndexType, num: number) {
   const currentPrice = st.price;
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
 
-  let extremeFactor: number;
-  let expectedDirection: string;
-  let referenceLevel: number | null;
-  let referenceStrength: number;
-  let distanceToLevel: number;
+  const { nearestSupport: ns, nearestResistance: nr } = { nearestSupport, nearestResistance };
 
-  if (type === "BOOM") {
-    // Boom: spike UP when price touches a strong support (oversold)
-    referenceLevel = nearestSupport?.price ?? null;
-    referenceStrength = nearestSupport?.strength ?? 0;
+  const up = scoreDirection(currentPrice, ns?.price ?? null, ns?.strength ?? 0, history, true);
+  const down = scoreDirection(currentPrice, nr?.price ?? null, nr?.strength ?? 0, history, false);
 
-    if (referenceLevel === null) {
-      // Fallback: use min of last 20 candles
-      const recentMin = Math.min(...history.slice(-20));
-      referenceLevel = recentMin;
-      referenceStrength = 1;
-    }
-
-    distanceToLevel = Math.abs(currentPrice - referenceLevel);
-    const maxDistance = referenceLevel * 0.015;
-    const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
-    extremeFactor = Math.min(proximity, 1);
-    expectedDirection = "up";
-
-    // If price broke below support, reduce confidence
-    if (currentPrice < referenceLevel) {
-      extremeFactor = Math.max(0, extremeFactor * 0.2);
-    }
-  } else {
-    // Crash: spike DOWN when price touches a strong resistance (overbought)
-    referenceLevel = nearestResistance?.price ?? null;
-    referenceStrength = nearestResistance?.strength ?? 0;
-
-    if (referenceLevel === null) {
-      // Fallback: use max of last 20 candles
-      const recentMax = Math.max(...history.slice(-20));
-      referenceLevel = recentMax;
-      referenceStrength = 1;
-    }
-
-    distanceToLevel = Math.abs(currentPrice - referenceLevel);
-    const maxDistance = referenceLevel * 0.015;
-    const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
-    extremeFactor = Math.min(proximity, 1);
-    expectedDirection = "down";
-
-    // If price broke above resistance, reduce confidence
-    if (currentPrice > referenceLevel) {
-      extremeFactor = Math.max(0, extremeFactor * 0.2);
-    }
-  }
-
-  const recentMoves = history.slice(-15).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
-  const consecutive = recentMoves.slice(-5).filter(m => type === "BOOM" ? m < 0 : m > 0).length;
-  const momentumFactor = Math.min(consecutive / 5, 1);
+  const isUp = up.score >= down.score;
+  const best = isUp ? up : down;
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
+  const probability = Math.min((best.score + timeFactor * 0.1) * 100, 95);
 
-  const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.15;
-  const spikeProbability = Math.min((extremeFactor * 0.55 + momentumFactor * 0.2 + timeFactor * 0.1 + strengthBonus) * 100, 95);
   const volatilityFactor = 1000 / num;
-  const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * volatilityFactor * 100).toFixed(1);
+  const magnitude = ((0.015 + best.score * 0.05) * volatilityFactor * 100).toFixed(1);
 
-  const sRrange = (nearestResistance?.price ?? currentPrice * 1.02) - (nearestSupport?.price ?? currentPrice * 0.98);
+  const pricePos = ns && nr
+    ? Math.round(((currentPrice - ns.price) / (nr.price - ns.price)) * 100)
+    : 50;
+
+  const expDir = isUp ? "up" : "down";
 
   return {
     type,
     number: num,
     currentPrice,
-    spikeProbability: Math.round(spikeProbability),
-    expectedDirection,
-    estimatedMagnitude: `${estimatedMagnitude}%`,
+    spikeProbability: Math.round(probability),
+    expectedDirection: expDir,
+    estimatedMagnitude: `${magnitude}%`,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: spikeProbability > 70,
-    pricePosition: nearestSupport && nearestResistance
-      ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
-      : 50,
-    consecutiveMoves: consecutive,
-    rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
-    rangeHigh: nearestResistance?.price ?? currentPrice * 1.02,
-    referenceLevel,
-    referenceStrength,
-    distancePercent: Math.round((distanceToLevel / (referenceLevel || currentPrice)) * 10000) / 100,
+    isSpikeImminent: probability > 70,
+    pricePosition: pricePos,
+    consecutiveMoves: best.consecutive,
+    rangeLow: ns?.price ?? currentPrice * 0.98,
+    rangeHigh: nr?.price ?? currentPrice * 1.02,
+    referenceLevel: best.referenceLevel,
+    referenceStrength: best.referenceStrength,
+    distancePercent: Math.round(best.distancePct * 100) / 100,
     sRlevels: allLevels.slice(0, 6).map(l => ({
       price: Math.round(l.price * 100) / 100,
       strength: l.strength,
       type: l.type,
     })),
+    upScore: Math.round(up.score * 100),
+    downScore: Math.round(down.score * 100),
     connected: st.connected,
     timestamp: Date.now(),
   };

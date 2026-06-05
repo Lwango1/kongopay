@@ -37,6 +37,8 @@ interface SpikePrediction {
   referenceStrength: number;
   distancePercent: number;
   sRlevels: SRLevel[];
+  upScore: number;
+  downScore: number;
   connected: boolean;
 }
 
@@ -268,12 +270,22 @@ export default function PredictionGame() {
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-3 border-t border-border">
+                  <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-border">
+                    <div className="rounded-lg bg-background border border-border p-2 text-center">
+                      <p className="text-[10px] text-text-muted uppercase font-semibold">Hausse (support)</p>
+                      <p className="text-sm font-bold font-mono text-success">{spike.upScore}%</p>
+                    </div>
+                    <div className="rounded-lg bg-background border border-border p-2 text-center">
+                      <p className="text-[10px] text-text-muted uppercase font-semibold">Baisse (résistance)</p>
+                      <p className="text-sm font-bold font-mono text-danger">{spike.downScore}%</p>
+                    </div>
+                  </div>
+                  <div className="mt-2">
                     <p className="text-xs text-text-secondary leading-relaxed">
                       <span className="text-text-muted">Raisonnement : </span>
-                      {activeIdx?.type === "BOOM"
-                        ? `Le prix est à ${spike.pricePosition}% du range, proche du support (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} baisses consécutives signalent un épuisement → l'algorithme anticipe un rebond.`
-                        : `Le prix est à ${spike.pricePosition}% du range, proche de la résistance (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} hausses consécutives signalent un essoufflement → l'algorithme anticipe un repli.`}
+                      {spike.expectedDirection === "up"
+                        ? `Le prix est à ${spike.pricePosition}% du range S/R, proche du support (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} baisses consécutives signalent un épuisement → l'algorithme anticipe un rebond (hausse).`
+                        : `Le prix est à ${spike.pricePosition}% du range S/R, proche de la résistance (${spike.referenceStrength} touchés). ${spike.consecutiveMoves} hausses consécutives signalent un essoufflement → l'algorithme anticipe un repli (baisse).`}
                     </p>
                   </div>
 
