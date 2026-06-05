@@ -49,7 +49,7 @@ for (const idx of INDICES) {
   });
 }
 
-let ws: WebSocket | null = null;
+let ws: any = null;
 let wsConnected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let historyLoaded = false;
@@ -57,6 +57,17 @@ const DERIV_TOKEN = process.env.NEXT_PUBLIC_DERIV_TOKEN || "";
 const DERIV_WS_URL = DERIV_TOKEN
   ? `wss://api.derivws.com/trading/v1/options/ws/real?otp=${DERIV_TOKEN}`
   : "wss://api.derivws.com/trading/v1/options/ws/public";
+
+const isServer = typeof window === "undefined";
+
+function createWebSocket(url: string): any {
+  if (isServer) {
+    // Use the 'ws' library on Node.js (native WebSocket has issues on Windows)
+    const { WebSocket: WsWebSocket } = require("ws");
+    return new WsWebSocket(url);
+  }
+  return new WebSocket(url);
+}
 
 function onTick(symbol: string, quote: number, epoch: number) {
   const key = keyFromSymbol(symbol);
@@ -125,7 +136,7 @@ const INDICES_FOR_HISTORY = [
 ];
 
 function subscribeAll() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (!ws || ws.readyState !== 1) return;
 
   for (const symbol of INDICES_FOR_HISTORY) {
     ws.send(JSON.stringify({ ticks: symbol, subscribe: 1 }));
@@ -140,29 +151,39 @@ function subscribeAll() {
   historyLoaded = true;
 }
 
+function wsOn(ws: any, event: string, handler: (...args: any[]) => void) {
+  if (isServer) {
+    ws.on(event, handler);
+  } else {
+    const prop = `on${event}` as keyof WebSocket;
+    (ws as any)[prop] = handler;
+  }
+}
+
 export function connectDerivWebSocket(): boolean {
   if (wsConnected) return true;
   if (!DERIV_WS_URL) return false;
 
   try {
-    ws = new WebSocket(DERIV_WS_URL);
+    ws = createWebSocket(DERIV_WS_URL);
 
-    ws.onopen = () => {
+    const onOpen = () => {
       wsConnected = true;
       historyLoaded = false;
       subscribeAll();
-      if (typeof window !== "undefined") {
+      if (!isServer) {
         console.log(`[Deriv] Connected to ${DERIV_WS_URL.split("?")[0]}${DERIV_TOKEN ? " (authentifié)" : ""}`);
       }
     };
 
-    ws.onmessage = (event) => {
+    const onMessage = (data: any) => {
       try {
-        processMessage(JSON.parse(event.data));
+        const payload = typeof data === "string" ? data : isServer ? data.toString() : data.data;
+        processMessage(JSON.parse(payload));
       } catch { /* ignore parse errors */ }
     };
 
-    ws.onclose = () => {
+    const onClose = () => {
       wsConnected = false;
       ws = null;
       for (const st of stateMap.values()) {
@@ -173,12 +194,19 @@ export function connectDerivWebSocket(): boolean {
       }, 3000);
     };
 
-    ws.onerror = () => {
+    const onError = (err: any) => {
+      if (!isServer) console.error("[Deriv] WebSocket error:", err?.message || err);
       wsConnected = false;
     };
 
+    wsOn(ws, "open", onOpen);
+    wsOn(ws, "message", onMessage);
+    wsOn(ws, "close", onClose);
+    wsOn(ws, "error", onError);
+
     return true;
-  } catch {
+  } catch (err) {
+    console.error("[Deriv] Failed to create WebSocket:", err);
     wsConnected = false;
     return false;
   }

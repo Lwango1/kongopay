@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Zap, Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3, ArrowUpFromLine, ArrowDownFromLine } from "lucide-react";
+import { Zap, Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3, ArrowUpFromLine, ArrowDownFromLine, ExternalLink } from "lucide-react";
 
 interface IndexData {
   price: number;
@@ -37,13 +37,15 @@ interface SpikePrediction {
 }
 
 const INDICES = [
-  { type: "BOOM", number: 500, icon: Flame, color: "#22c55e", label: "Boom 500" },
-  { type: "BOOM", number: 900, icon: Flame, color: "#16a34a", label: "Boom 900" },
-  { type: "BOOM", number: 1000, icon: Flame, color: "#15803d", label: "Boom 1000" },
-  { type: "CRASH", number: 500, icon: Droplet, color: "#fb7185", label: "Crash 500" },
-  { type: "CRASH", number: 900, icon: Droplet, color: "#f43f5e", label: "Crash 900" },
-  { type: "CRASH", number: 1000, icon: Droplet, color: "#be123c", label: "Crash 1000" },
+  { type: "BOOM", number: 500, icon: Flame, color: "#22c55e", label: "Boom 500", symbol: "BOOM500" },
+  { type: "BOOM", number: 900, icon: Flame, color: "#16a34a", label: "Boom 900", symbol: "BOOM900" },
+  { type: "BOOM", number: 1000, icon: Flame, color: "#15803d", label: "Boom 1000", symbol: "BOOM1000" },
+  { type: "CRASH", number: 500, icon: Droplet, color: "#fb7185", label: "Crash 500", symbol: "CRASH500" },
+  { type: "CRASH", number: 900, icon: Droplet, color: "#f43f5e", label: "Crash 900", symbol: "CRASH900" },
+  { type: "CRASH", number: 1000, icon: Droplet, color: "#be123c", label: "Crash 1000", symbol: "CRASH1000" },
 ];
+
+const DERIV_URL = "https://app.deriv.com/trading";
 
 export default function PredictionGame() {
   const [state, setState] = useState<Record<string, IndexData> | null>(null);
@@ -128,8 +130,15 @@ export default function PredictionGame() {
                   {change >= 0 ? "+" : ""}{change.toFixed(2)}%
                 </span>
               </div>
-              <div className="text-3xl font-bold font-mono mb-4">
-                ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-3xl font-bold font-mono">
+                  ${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <a href={`${DERIV_URL}?symbol=${activeIdx?.symbol}`} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all">
+                  <ExternalLink size={14} />
+                  Comparez sur Deriv
+                </a>
               </div>
               <div className="h-40 flex items-end gap-[2px]">
                 {history.slice(-80).map((p, i) => (
