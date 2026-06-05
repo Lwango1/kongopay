@@ -1,6 +1,29 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
 
 export default function TradingMockup() {
+  const [btcPrice, setBtcPrice] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchBtc = async () => {
+      try {
+        const res = await fetch("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT");
+        if (res.ok) {
+          const data = await res.json();
+          setBtcPrice(parseFloat(data.lastPrice));
+        }
+      } catch { /* ignore */ }
+    };
+    fetchBtc();
+    const interval = setInterval(fetchBtc, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const displayPrice = btcPrice ?? 0;
+  const change24h = 2.14;
+
   return (
     <section className="py-20 px-4 border-t border-border">
       <div className="max-w-7xl mx-auto">
@@ -16,9 +39,11 @@ export default function TradingMockup() {
               <div className="w-2 h-2 rounded-full bg-success" />
               BTC/USDT
             </span>
-            <span className="text-lg font-bold font-mono">$98,245.00</span>
-            <span className="text-sm text-success flex items-center gap-1"><TrendingUp size={14} /> +2.14%</span>
-            <span className="text-xs text-text-muted ml-auto">Vol: 42.5B USDT</span>
+            <span className="text-lg font-bold font-mono">
+              {btcPrice ? `$${btcPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Chargement..."}
+            </span>
+            <span className="text-sm text-success flex items-center gap-1"><TrendingUp size={14} /> +{change24h.toFixed(2)}%</span>
+            <span className="text-xs text-text-muted ml-auto">Source: Binance</span>
           </div>
           <div className="grid lg:grid-cols-3 gap-0">
             <div className="lg:col-span-2 p-4 border-r border-border">
@@ -40,7 +65,7 @@ export default function TradingMockup() {
               </div>
               <div>
                 <label className="text-xs text-text-muted mb-1 block">Prix (USDT)</label>
-                <input type="text" defaultValue="98245.00" readOnly className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-text outline-none focus:border-primary" />
+                <input type="text" value={btcPrice?.toFixed(2) ?? ""} readOnly className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-text outline-none focus:border-primary" />
               </div>
               <div>
                 <label className="text-xs text-text-muted mb-1 block">Quantité (BTC)</label>
