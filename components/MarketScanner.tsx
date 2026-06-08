@@ -165,7 +165,7 @@ export default function MarketScanner() {
 
   const [showAll, setShowAll] = useState(false);
   const imminentOpps = result?.opportunities.filter(o => o.isSpikeImminent) ?? [];
-  const goodOpps = result?.opportunities.filter(o => o.spikeProbability >= 50) ?? [];
+  const goodOpps = result?.opportunities.filter(o => o.spikeProbability >= 80) ?? [];
   const displayedOpps = showAll ? (result?.opportunities ?? []) : goodOpps;
 
   return (
@@ -293,7 +293,7 @@ export default function MarketScanner() {
             {!showAll && goodOpps.length < (result?.opportunities?.length ?? 0) && (
               <div className="px-4 py-2 border-t border-border/50 text-center">
                 <button onClick={() => setShowAll(true)} className="text-xs text-primary hover:text-primary/80 transition-colors">
-                  + {((result?.opportunities?.length ?? 0) - goodOpps.length)} marchés sans signal pertinent
+                  + {((result?.opportunities?.length ?? 0) - goodOpps.length)} marchés sous les 80%
                 </button>
               </div>
             )}
