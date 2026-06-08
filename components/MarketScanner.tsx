@@ -163,8 +163,10 @@ export default function MarketScanner() {
     return () => clearInterval(interval);
   }, [fetchScan]);
 
+  const [showAll, setShowAll] = useState(false);
   const imminentOpps = result?.opportunities.filter(o => o.isSpikeImminent) ?? [];
-  const sortedOpps = result?.opportunities ?? [];
+  const goodOpps = result?.opportunities.filter(o => o.spikeProbability >= 50) ?? [];
+  const displayedOpps = showAll ? (result?.opportunities ?? []) : goodOpps;
 
   return (
     <section id="scanner" className="py-20 px-4 border-t border-border">
@@ -181,9 +183,6 @@ export default function MarketScanner() {
                 {connected ? "Live" : "Déconnecté"}
               </div>
             </div>
-            <p className="text-text-secondary mt-2">
-              Analyse de tous les indices Boom & Crash simultanément — {result?.totalAnalyzed ?? 0} marchés analysés
-            </p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -194,6 +193,12 @@ export default function MarketScanner() {
               {soundEnabled ? "Son ON" : "Son OFF"}
             </button>
             <button
+              onClick={() => { setShowAll(!showAll); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${showAll ? "bg-primary/15 text-primary border border-primary/30" : "bg-surface border border-border text-text-secondary"}`}
+            >
+              {showAll ? "Filtrer" : "Voir tout"}
+            </button>
+            <button
               onClick={() => { setPaused(!paused); }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${paused ? "bg-warning/20 text-warning border border-warning/30" : "bg-surface border border-border text-text-secondary"}`}
             >
@@ -202,12 +207,19 @@ export default function MarketScanner() {
           </div>
         </div>
 
+        {connected && goodOpps.length === 0 && !showAll && (
+          <div className="mb-6 p-4 rounded-xl border border-border bg-surface/50 text-center text-sm text-text-secondary">
+            <Gauge size={20} className="inline mr-2 text-primary" />
+            Aucune opportunité significative pour le moment. Le scan surveille les 6 indices en continu.
+          </div>
+        )}
+
         {imminentOpps.length > 0 && (
           <div className="space-y-3 mb-6">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-danger animate-ping" />
               <span className="text-sm font-semibold text-danger">
-                {imminentOpps.length} opportunité{imminentOpps.length > 1 ? "s" : ""} imminente{imminentOpps.length > 1 ? "s" : ""}
+                Spike imminent sur {imminentOpps.map(o => o.label).join(", ")}
               </span>
             </div>
             {imminentOpps.map(opp => (
@@ -216,35 +228,30 @@ export default function MarketScanner() {
           </div>
         )}
 
-        {result && (
+        {result && displayedOpps.length > 0 && (
           <div className="rounded-xl border border-border bg-surface overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border text-xs text-text-muted uppercase">
                     <th className="text-left px-4 py-3 font-semibold">Marché</th>
-                    <th className="text-right px-4 py-3 font-semibold">Prix</th>
-                    <th className="text-right px-4 py-3 font-semibold">Variation 24h</th>
                     <th className="text-right px-4 py-3 font-semibold">Probabilité</th>
                     <th className="text-right px-4 py-3 font-semibold">Direction</th>
                     <th className="text-right px-4 py-3 font-semibold">Ampleur</th>
                     <th className="text-right px-4 py-3 font-semibold">Dernier spike</th>
-                    <th className="text-right px-4 py-3 font-semibold">Position S/R</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedOpps.map((opp) => {
+                  {displayedOpps.map((opp) => {
                     const cfg = INDICES_CONFIG[opp.label] ?? { color: "#94a3b8", bgColor: "rgba(148,163,184,0.1)" };
-                    const isExpanded = expandedOpportunity === `${opp.type}_${opp.number}`;
-                    const isBest = result.bestOpportunity && `${result.bestOpportunity.type}_${result.bestOpportunity.number}` === `${opp.type}_${opp.number}`;
+                    const probColor = opp.isSpikeImminent ? "#ef4444" : opp.spikeProbability > 50 ? "#f59e0b" : "#22c55e";
 
                     return (
                       <tr key={`${opp.type}_${opp.number}`}
                         className={`border-b border-border/50 text-sm transition-colors cursor-pointer
-                          ${opp.isSpikeImminent ? "bg-danger/5" : isBest ? "bg-primary/5" : "hover:bg-surface-light/50"}
-                          ${isExpanded ? "bg-surface-light" : ""}`}
+                          ${opp.isSpikeImminent ? "bg-danger/5" : "hover:bg-surface-light/50"}`}
                         onClick={() => setExpandedOpportunity(
-                          isExpanded ? null : `${opp.type}_${opp.number}`
+                          expandedOpportunity === `${opp.type}_${opp.number}` ? null : `${opp.type}_${opp.number}`
                         )}
                       >
                         <td className="px-4 py-3">
@@ -253,25 +260,18 @@ export default function MarketScanner() {
                             <span className="font-semibold" style={{ color: cfg.color }}>{opp.label}</span>
                             {opp.isSpikeImminent && (
                               <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-danger/20 text-danger border border-danger/30">
-                                <AlertTriangle size={10} />
                                 ALERTE
-                              </span>
-                            )}
-                            {isBest && !opp.isSpikeImminent && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-primary/20 text-primary border border-primary/30">
-                                TOP
                               </span>
                             )}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-semibold">
-                          ${opp.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className={`px-4 py-3 text-right font-mono text-xs ${opp.change24h >= 0 ? "text-success" : "text-danger"}`}>
-                          {opp.change24h >= 0 ? "+" : ""}{opp.change24h.toFixed(2)}%
-                        </td>
                         <td className="px-4 py-3 text-right">
-                          <ScoreBar value={opp.spikeProbability} color={opp.isSpikeImminent ? "#ef4444" : opp.spikeProbability > 50 ? "#f59e0b" : "#22c55e"} />
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-20 h-1.5 rounded-full bg-surface-light overflow-hidden">
+                              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${opp.spikeProbability}%`, background: probColor }} />
+                            </div>
+                            <span className="font-mono text-xs font-bold" style={{ color: probColor }}>{opp.spikeProbability}%</span>
+                          </div>
                         </td>
                         <td className={`px-4 py-3 text-right font-semibold capitalize ${opp.expectedDirection === "up" ? "text-success" : "text-danger"}`}>
                           {opp.expectedDirection === "up" ? "Hausse ↗" : "Baisse ↘"}
@@ -284,21 +284,19 @@ export default function MarketScanner() {
                             ? `${Math.round(opp.timeSinceLastSpike / 60)}m`
                             : `${opp.timeSinceLastSpike}s`}
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="inline-flex items-center gap-1.5">
-                            <div className="w-16 h-1.5 rounded-full bg-surface-light overflow-hidden">
-                              <div className="h-full rounded-full bg-primary/60 transition-all"
-                                style={{ width: `${opp.pricePosition}%` }} />
-                            </div>
-                            <span className="text-[10px] font-mono text-text-muted">{opp.pricePosition}%</span>
-                          </div>
-                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+            {!showAll && goodOpps.length < (result?.opportunities?.length ?? 0) && (
+              <div className="px-4 py-2 border-t border-border/50 text-center">
+                <button onClick={() => setShowAll(true)} className="text-xs text-primary hover:text-primary/80 transition-colors">
+                  + {((result?.opportunities?.length ?? 0) - goodOpps.length)} marchés sans signal pertinent
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -410,7 +408,7 @@ export default function MarketScanner() {
         {!connected && (
           <div className="mt-4 p-4 rounded-xl border border-yellow-500/30 bg-yellow-500/5 text-center text-sm text-text-secondary">
             <AlertTriangle size={16} className="inline mr-2 text-warning" />
-            Connexion WebSocket en cours... Données non disponibles.
+            Connexion WebSocket en cours...
           </div>
         )}
       </div>
