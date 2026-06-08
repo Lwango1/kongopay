@@ -616,6 +616,89 @@ export function getCandlesticks(type: IndexType, num: number): Candlestick[] {
   return candleMap.get(getKey(type, num)) || [];
 }
 
+export interface MarketOpportunity {
+  type: IndexType;
+  number: number;
+  label: string;
+  currentPrice: number;
+  change24h: number;
+  spikeProbability: number;
+  expectedDirection: "up" | "down";
+  estimatedMagnitude: string;
+  isSpikeImminent: boolean;
+  timeSinceLastSpike: number;
+  pricePosition: number;
+  consecutiveMoves: number;
+  referenceLevel: number;
+  referenceStrength: number;
+  distancePercent: number;
+  upScore: number;
+  downScore: number;
+  sRlevels: { price: number; strength: number; type: "support" | "resistance" }[];
+  orderBlocks: { price: number; type: "bullish" | "bearish"; strength: number }[];
+  connected: boolean;
+  timestamp: number;
+}
+
+export interface MarketScanResult {
+  timestamp: number;
+  source: "deriv-live" | "disconnected";
+  opportunities: MarketOpportunity[];
+  bestOpportunity: MarketOpportunity | null;
+  imminentCount: number;
+  totalAnalyzed: number;
+}
+
+export function scanAllMarkets(): MarketScanResult {
+  const opportunities: MarketOpportunity[] = [];
+
+  for (const idx of INDICES) {
+    const key = getKey(idx.type, idx.number);
+    const st = stateMap.get(key);
+    if (!st || st.history.length < 20) continue;
+
+    const prediction = predictSpike(idx.type, idx.number);
+    if (!prediction || "error" in prediction) continue;
+
+    const label = `${idx.type === "BOOM" ? "Boom" : "Crash"} ${idx.number}`;
+
+    opportunities.push({
+      type: idx.type,
+      number: idx.number,
+      label,
+      currentPrice: prediction.currentPrice,
+      change24h: st.change24h,
+      spikeProbability: prediction.spikeProbability,
+      expectedDirection: prediction.expectedDirection as "up" | "down",
+      estimatedMagnitude: prediction.estimatedMagnitude,
+      isSpikeImminent: prediction.isSpikeImminent,
+      timeSinceLastSpike: prediction.timeSinceLastSpike,
+      pricePosition: prediction.pricePosition,
+      consecutiveMoves: prediction.consecutiveMoves,
+      referenceLevel: prediction.referenceLevel,
+      referenceStrength: prediction.referenceStrength,
+      distancePercent: prediction.distancePercent,
+      upScore: prediction.upScore,
+      downScore: prediction.downScore,
+      sRlevels: prediction.sRlevels,
+      orderBlocks: prediction.orderBlocks,
+      connected: prediction.connected,
+      timestamp: prediction.timestamp,
+    });
+  }
+
+  opportunities.sort((a, b) => b.spikeProbability - a.spikeProbability);
+
+  return {
+    timestamp: Date.now(),
+    source: wsConnected ? "deriv-live" : "disconnected",
+    opportunities,
+    bestOpportunity: opportunities.length > 0 ? opportunities[0] : null,
+    imminentCount: opportunities.filter(o => o.isSpikeImminent).length,
+    totalAnalyzed: opportunities.length,
+  };
+}
+
 export function initDerivClient() {
   if (typeof window === "undefined") return false;
   return connectDerivWebSocket();

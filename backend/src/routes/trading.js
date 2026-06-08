@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { binanceService } from '../services/binance.js';
 import { walletService } from '../services/wallet.js';
+import { validateOrder } from '../utils/validators.js';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ router.get('/ticker', async (req, res, next) => {
 router.get('/orderbook', async (req, res, next) => {
   try {
     const symbol = (req.query.symbol || 'BTC/USDT').toUpperCase();
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const orderbook = await binanceService.getOrderBook(symbol, limit);
     res.json(orderbook);
   } catch (err) {
@@ -30,7 +31,7 @@ router.get('/history', async (req, res, next) => {
   try {
     const symbol = (req.query.symbol || 'BTC/USDT').toUpperCase();
     const timeframe = req.query.timeframe || '1h';
-    const limit = parseInt(req.query.limit) || 100;
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
     const candles = await binanceService.getHistoricalRates(symbol, timeframe, limit);
     res.json(candles);
   } catch (err) {
@@ -38,7 +39,7 @@ router.get('/history', async (req, res, next) => {
   }
 });
 
-router.post('/order', authenticate, async (req, res, next) => {
+router.post('/order', authenticate, validateOrder, async (req, res, next) => {
   try {
     const { symbol, type, side, amount, price } = req.body;
     const order = await binanceService.createOrder({

@@ -23,4 +23,9 @@ router.get('/spike', (req, res) => {
   res.json({ prediction, history: spikeHistory });
 });
 
+router.get('/scan', (req, res) => {
+  const result = derivService.scanAllMarkets();
+  res.json(result);
+});
+
 export default router;

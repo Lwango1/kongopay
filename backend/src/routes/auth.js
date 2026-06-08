@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { auth } from '../config/firebase.js';
 import { authenticate } from '../middleware/auth.js';
 import { walletService } from '../services/wallet.js';
+import { validateRegister } from '../utils/validators.js';
 
 const router = Router();
 
-router.post('/register', async (req, res, next) => {
+router.post('/register', validateRegister, async (req, res, next) => {
   try {
     const { email, password, displayName } = req.body;
     const user = await auth.createUser({ email, password, displayName });

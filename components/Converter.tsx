@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowDownUp } from "lucide-react";
+import { getAllTickers } from "@/lib/binance";
 
 const COINS = ["BTC", "ETH", "SOL", "BNB", "USDT"];
 
@@ -9,8 +10,41 @@ export default function Converter() {
   const [from, setFrom] = useState("BTC");
   const [to, setTo] = useState("USDT");
   const [amount, setAmount] = useState("1");
-  const rate = from === "BTC" && to === "USDT" ? 98245 : from === "ETH" && to === "USDT" ? 3842.5 : from === "SOL" && to === "USDT" ? 187.45 : 0;
-  const result = amount ? (parseFloat(amount) * rate).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
+  const [rates, setRates] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchRates = async () => {
+      try {
+        const tickers = await getAllTickers();
+        const rateMap: Record<string, number> = {};
+        for (const t of tickers) {
+          const base = t.symbol.split("/")[0];
+          rateMap[`${base}_USDT`] = t.price;
+        }
+        setRates(rateMap);
+      } catch {
+        // Keep defaults on error
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchRates();
+    const interval = setInterval(fetchRates, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getRate = (a: string, b: string): number => {
+    if (a === b) return 1;
+    if (a === "USDT") return 1 / (rates[`${b}_USDT`] || 1);
+    if (b === "USDT") return rates[`${a}_USDT`] || 0;
+    const aUsdt = rates[`${a}_USDT`] || 0;
+    const bUsdt = rates[`${b}_USDT`] || 1;
+    return aUsdt / bUsdt;
+  };
+
+  const rate = getRate(from, to);
+  const result = amount ? (parseFloat(amount) * rate).toLocaleString(undefined, { maximumFractionDigits: 6 }) : "—";
 
   return (
     <section className="py-20 px-4 border-t border-border">
@@ -42,9 +76,14 @@ export default function Converter() {
             </div>
           </div>
           <div className="mt-6 p-4 rounded-lg bg-background border border-border">
-            <div className="text-xs text-text-muted mb-1">Résultat</div>
+            <div className="text-xs text-text-muted mb-1">
+              Résultat {loading && "(taux en direct...)"}
+            </div>
             <div className="text-2xl font-bold font-mono">{result} {to}</div>
-            <div className="text-xs text-text-muted mt-1">1 {from} = {rate.toLocaleString()} {to}</div>
+            <div className="text-xs text-text-muted mt-1">
+              1 {from} = {rate.toLocaleString()} {to}
+              {loading && <span className="ml-2 animate-pulse">⏳</span>}
+            </div>
           </div>
         </div>
       </div>

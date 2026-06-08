@@ -213,7 +213,7 @@ class DerivLiveService {
     return result;
   }
 
-  CLUSTER_TOLERANCE: 0.003;
+  get CLUSTER_TOLERANCE() { return 0.003; }
 
   findSupportResistance(prices, currentPrice) {
     const lookback = prices.slice(-120);
@@ -398,6 +398,53 @@ class DerivLiveService {
       confidence: Math.round(confidence * 100),
       connected: st.connected,
       timestamp: Date.now(),
+    };
+  }
+
+  scanAllMarkets() {
+    const opportunities = [];
+
+    for (const idx of INDICES) {
+      const key = getKey(idx.type, idx.number);
+      const st = this.stateMap.get(key);
+      if (!st || st.history.length < 20) continue;
+
+      const prediction = this.predictSpike(idx.type, idx.number);
+      if (!prediction || prediction.error) continue;
+
+      const label = `${idx.type === 'BOOM' ? 'Boom' : 'Crash'} ${idx.number}`;
+
+      opportunities.push({
+        type: idx.type,
+        number: idx.number,
+        label,
+        currentPrice: prediction.currentPrice,
+        change24h: st.change24h,
+        spikeProbability: prediction.spikeProbability,
+        expectedDirection: prediction.expectedDirection,
+        estimatedMagnitude: prediction.estimatedMagnitude,
+        isSpikeImminent: prediction.isSpikeImminent,
+        timeSinceLastSpike: prediction.timeSinceLastSpike,
+        pricePosition: prediction.pricePosition,
+        consecutiveMoves: prediction.consecutiveMoves,
+        referenceLevel: prediction.referenceLevel,
+        referenceStrength: prediction.referenceStrength,
+        distancePercent: prediction.distancePercent,
+        sRlevels: prediction.sRlevels,
+        connected: prediction.connected,
+        timestamp: prediction.timestamp,
+      });
+    }
+
+    opportunities.sort((a, b) => b.spikeProbability - a.spikeProbability);
+
+    return {
+      timestamp: Date.now(),
+      source: this.wsConnected ? 'deriv-live' : 'disconnected',
+      opportunities,
+      bestOpportunity: opportunities.length > 0 ? opportunities[0] : null,
+      imminentCount: opportunities.filter(o => o.isSpikeImminent).length,
+      totalAnalyzed: opportunities.length,
     };
   }
 }

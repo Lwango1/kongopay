@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Menu, X, ChevronDown } from "lucide-react";
+import { Menu, X, LogOut, User } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
+import { useRouter } from "next/navigation";
 
 const NAV_ITEMS = [
   { label: "Accueil", href: "/" },
@@ -14,6 +16,13 @@ const NAV_ITEMS = [
 
 export default function Header() {
   const [open, setOpen] = useState(false);
+  const { user, logout, loading } = useAuth();
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await logout();
+    router.push("/");
+  };
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
@@ -31,8 +40,23 @@ export default function Header() {
             </nav>
           </div>
           <div className="hidden md:flex items-center gap-3">
-            <a href="/connexion" className="text-sm text-text-secondary hover:text-text transition-colors px-4 py-2">Connexion</a>
-            <a href="/inscription" className="text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg font-medium transition-colors">S&apos;inscrire</a>
+            {loading ? null : user ? (
+              <>
+                <a href="/portefeuille" className="flex items-center gap-2 text-sm text-text-secondary hover:text-text transition-colors px-4 py-2">
+                  <User size={16} />
+                  <span className="max-w-[120px] truncate">{user.displayName || user.email}</span>
+                </a>
+                <button onClick={handleLogout} className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors px-3 py-2">
+                  <LogOut size={14} />
+                  Quitter
+                </button>
+              </>
+            ) : (
+              <>
+                <a href="/connexion" className="text-sm text-text-secondary hover:text-text transition-colors px-4 py-2">Connexion</a>
+                <a href="/inscription" className="text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg font-medium transition-colors">S&apos;inscrire</a>
+              </>
+            )}
           </div>
           <button onClick={() => setOpen(!open)} className="md:hidden text-text p-2">
             {open ? <X size={24} /> : <Menu size={24} />}
@@ -46,8 +70,14 @@ export default function Header() {
               <a key={item.href} href={item.href} className="block text-sm text-text-secondary hover:text-text py-2">{item.label}</a>
             ))}
             <hr className="border-border" />
-            <a href="/connexion" className="block text-sm text-text-secondary hover:text-text py-2">Connexion</a>
-            <a href="/inscription" className="block text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-lg font-medium text-center">S&apos;inscrire</a>
+            {user ? (
+              <button onClick={handleLogout} className="block w-full text-left text-sm text-danger hover:text-danger/80 py-2">Déconnexion</button>
+            ) : (
+              <>
+                <a href="/connexion" className="block text-sm text-text-secondary hover:text-text py-2">Connexion</a>
+                <a href="/inscription" className="block text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-lg font-medium text-center">S&apos;inscrire</a>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -54,3 +54,37 @@ export async function fetchSpikePrediction(type: string, number: number): Promis
   } catch { /* ignore */ }
   return null;
 }
+
+export interface MarketOpportunity {
+  type: string;
+  number: number;
+  label: string;
+  currentPrice: number;
+  change24h: number;
+  spikeProbability: number;
+  expectedDirection: string;
+  estimatedMagnitude: string;
+  isSpikeImminent: boolean;
+  timeSinceLastSpike: number;
+  pricePosition: number;
+  consecutiveMoves: number;
+  connected: boolean;
+  timestamp: number;
+}
+
+export interface MarketScanResult {
+  timestamp: number;
+  source: string;
+  opportunities: MarketOpportunity[];
+  bestOpportunity: MarketOpportunity | null;
+  imminentCount: number;
+  totalAnalyzed: number;
+}
+
+export async function fetchMarketScan(): Promise<MarketScanResult | null> {
+  try {
+    const res = await fetch(`${API_BASE}/scan`);
+    if (res.ok) return await res.json();
+  } catch { /* ignore */ }
+  return null;
+}
