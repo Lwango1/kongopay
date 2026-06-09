@@ -92,7 +92,10 @@ initCandleMap(candleMap15m);
 let ws: any = null;
 let wsConnected = false;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 let historyLoaded = false;
+let reconnectDelay = 1000;
+const maxReconnectDelay = 30000;
 const DERIV_TOKEN = process.env.NEXT_PUBLIC_DERIV_TOKEN || "";
 const DERIV_WS_URL = DERIV_TOKEN
   ? `wss://api.derivws.com/trading/v1/options/ws/real?otp=${DERIV_TOKEN}`
@@ -229,8 +232,34 @@ function wsOn(ws: any, event: string, handler: (...args: any[]) => void) {
   }
 }
 
+function startKeepAlive() {
+  stopKeepAlive();
+  if (isServer) {
+    keepAliveTimer = setInterval(() => {
+      if (ws && ws.readyState === 1) { ws.ping(); }
+    }, 25000);
+  } else {
+    keepAliveTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ ping: 1 })); }
+    }, 25000);
+  }
+}
+
+function stopKeepAlive() {
+  if (keepAliveTimer) { clearInterval(keepAliveTimer); keepAliveTimer = null; }
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  const delay = reconnectDelay + Math.random() * 1000;
+  reconnectTimer = setTimeout(() => {
+    reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+    connectDerivWebSocket();
+  }, delay);
+}
+
 export function connectDerivWebSocket(): boolean {
-  if (wsConnected) return true;
+  if (ws && ws.readyState === (isServer ? 1 : WebSocket.OPEN)) return true;
   if (!DERIV_WS_URL) return false;
 
   try {
@@ -238,8 +267,10 @@ export function connectDerivWebSocket(): boolean {
 
     const onOpen = () => {
       wsConnected = true;
+      reconnectDelay = 1000;
       historyLoaded = false;
       subscribeAll();
+      startKeepAlive();
       if (!isServer) {
         console.log(`[Deriv] Connected to ${DERIV_WS_URL.split("?")[0]}${DERIV_TOKEN ? " (authentifié)" : ""}`);
       }
@@ -255,17 +286,19 @@ export function connectDerivWebSocket(): boolean {
     const onClose = () => {
       wsConnected = false;
       ws = null;
+      stopKeepAlive();
       for (const st of stateMap.values()) {
         st.connected = false;
       }
-      reconnectTimer = setTimeout(() => {
-        connectDerivWebSocket();
-      }, 3000);
+      if (!isServer) console.log("[Deriv] Disconnected, reconnexion dans " + Math.round(reconnectDelay / 1000) + "s");
+      scheduleReconnect();
     };
 
     const onError = (err: any) => {
       if (!isServer) console.error("[Deriv] WebSocket error:", err?.message || err);
       wsConnected = false;
+      stopKeepAlive();
+      scheduleReconnect();
     };
 
     wsOn(ws, "open", onOpen);
@@ -277,11 +310,13 @@ export function connectDerivWebSocket(): boolean {
   } catch (err) {
     console.error("[Deriv] Failed to create WebSocket:", err);
     wsConnected = false;
+    scheduleReconnect();
     return false;
   }
 }
 
 export function disconnectDerivWebSocket() {
+  stopKeepAlive();
   if (reconnectTimer) clearTimeout(reconnectTimer);
   if (ws) {
     ws.close();

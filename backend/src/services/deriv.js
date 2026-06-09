@@ -31,7 +31,10 @@ class DerivLiveService {
     this.ws = null;
     this.wsConnected = false;
     this.reconnectTimer = null;
+    this.keepAliveTimer = null;
     this.historyLoaded = false;
+    this.reconnectDelay = 1000;
+    this.maxReconnectDelay = 30000;
 
     for (const idx of INDICES) {
       this.stateMap.set(getKey(idx.type, idx.number), {
@@ -44,6 +47,31 @@ class DerivLiveService {
         connected: false,
       });
     }
+  }
+
+  startKeepAlive() {
+    this.stopKeepAlive();
+    this.keepAliveTimer = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.ping();
+      }
+    }, 25000);
+  }
+
+  stopKeepAlive() {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+  }
+
+  scheduleReconnect() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    const delay = this.reconnectDelay + Math.random() * 1000;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
+      this.connect();
+    }, delay);
   }
 
   onTick(symbol, quote, epoch) {
@@ -124,7 +152,7 @@ class DerivLiveService {
   }
 
   connect() {
-    if (this.wsConnected) return;
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
     if (!DERIV_WS_URL) {
       console.warn('[Deriv] DERIV_WS_URL not available');
       return;
@@ -135,8 +163,10 @@ class DerivLiveService {
 
       this.ws.on('open', () => {
         this.wsConnected = true;
+        this.reconnectDelay = 1000;
         this.historyLoaded = false;
         this.subscribeAll();
+        this.startKeepAlive();
         console.log(`[Deriv] Connected${DERIV_TOKEN ? ' (authentifié)' : ''}`);
       });
 
@@ -148,23 +178,29 @@ class DerivLiveService {
 
       this.ws.on('close', () => {
         this.wsConnected = false;
+        this.stopKeepAlive();
         for (const st of this.stateMap.values()) {
           st.connected = false;
         }
-        this.reconnectTimer = setTimeout(() => this.connect(), 3000);
+        console.log('[Deriv] Disconnected, reconnexion dans ' + Math.round(this.reconnectDelay / 1000) + 's');
+        this.scheduleReconnect();
       });
 
       this.ws.on('error', (err) => {
         console.error('[Deriv] WebSocket error:', err.message);
         this.wsConnected = false;
+        this.stopKeepAlive();
+        this.scheduleReconnect();
       });
     } catch (err) {
       console.error('[Deriv] Connection failed:', err.message);
       this.wsConnected = false;
+      this.scheduleReconnect();
     }
   }
 
   disconnect() {
+    this.stopKeepAlive();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.ws) {
       this.ws.close();
