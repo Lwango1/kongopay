@@ -99,7 +99,7 @@ const maxReconnectDelay = 30000;
 const DERIV_TOKEN = process.env.NEXT_PUBLIC_DERIV_TOKEN || "";
 const DERIV_WS_URL = DERIV_TOKEN
   ? `wss://api.derivws.com/trading/v1/options/ws/real?otp=${DERIV_TOKEN}`
-  : "wss://api.derivws.com/trading/v1/options/ws/public";
+  : "wss://ws.derivws.com/websockets/v3?app_id=1089";
 
 const isServer = typeof window === "undefined";
 
