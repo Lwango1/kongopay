@@ -9,6 +9,12 @@ import {
 import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
 import type { Candlestick, Signal } from "@/lib/deriv";
 import { initDerivClient, getDerivState, predictSpike, getCandlesticks } from "@/lib/deriv";
+
+interface SRLevel {
+  price: number;
+  strength: number;
+  type: "support" | "resistance";
+}
 import type { IndexType } from "@/lib/deriv";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
@@ -29,6 +35,13 @@ interface DetectedSignal {
   magnitude: string;
   timeSinceSpike: number;
   detectedAt: number;
+  upScore?: number;
+  downScore?: number;
+  consecutiveMoves?: number;
+  distancePercent?: number;
+  referenceStrength?: number;
+  sRlevels?: SRLevel[];
+  referenceLevel?: number;
 }
 
 const INDICES: IndexInfo[] = [
@@ -99,6 +112,13 @@ export default function PredictionGame() {
           magnitude: p.estimatedMagnitude ?? "0%",
           timeSinceSpike: p.timeSinceSpike ?? 0,
           detectedAt: now,
+          upScore: p.upScore,
+          downScore: p.downScore,
+          consecutiveMoves: p.consecutiveMoves,
+          distancePercent: p.distancePercent,
+          referenceStrength: p.referenceStrength,
+          sRlevels: p.sRlevels,
+          referenceLevel: p.referenceLevel,
         });
 
         if (!selectedSignal) setSelectedSignal(k);
@@ -252,77 +272,90 @@ export default function PredictionGame() {
                     <div ref={chartRef} className="w-full" />
                   </div>
 
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-5 relative overflow-hidden">
-                    {!isPremium && (
-                      <div className={`absolute inset-0 z-10 ${user ? "bg-background/80 backdrop-blur-sm" : "bg-background/80 backdrop-blur-sm"} flex flex-col items-center justify-center gap-3 p-6`}>
-                        {!user ? (
-                          <>
-                            <Lock size={32} className="text-text-muted" />
-                            <p className="font-semibold text-text">Signal réservé aux membres</p>
-                            <a href="/connexion" className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90">Se connecter</a>
-                          </>
-                        ) : (
-                          <>
-                            <Crown size={32} className="text-warning" />
-                            <p className="font-semibold text-text">Signal Premium</p>
-                            <p className="text-xs text-text-secondary text-center">
-                              {signalUsage.remaining > 0
-                                ? `Il te reste ${signalUsage.remaining} signal${signalUsage.remaining > 1 ? 'x' : ''} gratuit aujourd'hui sur 4`
-                                : "Abonne-toi pour voir les signaux en temps réel"}
-                            </p>
-                            {signalUsage.remaining > 0 ? (
-                              <span className="bg-primary/20 text-primary px-4 py-1.5 rounded-lg text-xs font-semibold">
-                                {signalUsage.remaining}/{4} gratuit{signalUsage.remaining > 1 ? 's' : ''}
-                              </span>
-                            ) : (
-                              <a href="/recompenses" className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90">
-                                Premium — 10 $/mois
-                              </a>
-                            )}
-                          </>
-                        )}
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-bold text-sm flex items-center gap-2">
+                        <Zap size={16} className="text-primary" />
+                        {signal.index.label} — Analyse Algorithmique
+                      </span>
+                      <span className={`font-bold font-mono text-lg ${signal.probability >= 85 ? "text-danger" : "text-warning"}`}>
+                        {signal.probability}%
+                      </span>
+                    </div>
+
+                    <div className="w-full h-1.5 bg-surface-light rounded-full mb-4 overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${signal.probability}%`, background: signal.probability >= 85 ? "#ef4444" : "#f59e0b" }} />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 mb-4 text-xs text-text-secondary">
+                      <div className={`rounded-lg border p-2.5 ${signal.direction === "up" ? "bg-success/5 border-success/20" : "bg-surface-light border-border"}`}>
+                        <div className="text-text-muted text-[10px] uppercase font-semibold">Hausse (support)</div>
+                        <div className="font-bold font-mono text-success">{signal.upScore ?? signal.probability}%</div>
+                        <div className="text-[9px] text-text-muted mt-0.5">
+                          {signal.index.type === "BOOM" ? "Proche du support → rebond probable" : "Éloigné de la résistance"}
+                        </div>
+                      </div>
+                      <div className={`rounded-lg border p-2.5 ${signal.direction === "down" ? "bg-danger/5 border-danger/20" : "bg-surface-light border-border"}`}>
+                        <div className="text-text-muted text-[10px] uppercase font-semibold">Baisse (résistance)</div>
+                        <div className="font-bold font-mono text-danger">{signal.downScore ?? Math.round(signal.probability * 0.4)}%</div>
+                        <div className="text-[9px] text-text-muted mt-0.5">
+                          {signal.index.type === "CRASH" ? "Proche de la résistance → retournement probable" : "Support solide en dessous"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                      <div className="rounded-lg bg-background border border-border p-2.5 text-center">
+                        <p className="text-[9px] text-text-muted uppercase font-semibold">Entrée</p>
+                        <p className="font-bold font-mono text-xs text-text mt-0.5">${signal.entryPrice.toFixed(2)}</p>
+                      </div>
+                      <div className="rounded-lg bg-background border border-border p-2.5 text-center">
+                        <p className="text-[9px] text-text-muted uppercase font-semibold">Stop Loss</p>
+                        <p className={`font-bold font-mono text-xs mt-0.5 ${signal.direction === "up" ? "text-danger" : "text-success"}`}>${signal.stopLoss.toFixed(2)}</p>
+                      </div>
+                      <div className="rounded-lg bg-background border border-border p-2.5 text-center">
+                        <p className="text-[9px] text-text-muted uppercase font-semibold">Take Profit</p>
+                        <p className={`font-bold font-mono text-xs mt-0.5 ${signal.direction === "up" ? "text-success" : "text-danger"}`}>${signal.takeProfit.toFixed(2)}</p>
+                      </div>
+                      <div className="rounded-lg bg-background border border-border p-2.5 text-center">
+                        <p className="text-[9px] text-text-muted uppercase font-semibold">Ampleur</p>
+                        <p className="font-bold font-mono text-xs text-text mt-0.5">{signal.magnitude}</p>
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-lg bg-surface-light/50 border border-border text-[10px] text-text-secondary leading-relaxed mb-3">
+                      <span className="font-semibold text-text-muted">Raisonnement : </span>
+                      {signal.consecutiveMoves !== undefined && (
+                        <>{signal.consecutiveMoves} mouvements consécutifs opposés • </>
+                      )}
+                      Distance du niveau S/R : {signal.distancePercent ?? 0}% • 
+                      Force S/R : {signal.referenceStrength ?? 0} touches • 
+                      Dernier spike il y a {signal.timeSinceSpike}s
+                    </div>
+
+                    {signal.sRlevels && signal.sRlevels.length > 0 && (
+                      <div className="mb-3">
+                        <div className="text-[10px] font-semibold text-text-muted uppercase mb-1.5">Niveaux S/R détectés</div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {signal.sRlevels.map((level, i) => (
+                            <span key={i}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium
+                                ${level.type === "support"
+                                  ? "bg-success/10 text-success border border-success/20"
+                                  : "bg-danger/10 text-danger border border-danger/20"}`}
+                            >
+                              <span className={`w-1 h-1 rounded-full ${level.type === "support" ? "bg-success" : "bg-danger"}`} />
+                              ${level.price.toLocaleString(undefined, { minimumFractionDigits: 1 })}
+                              <span className="opacity-60">x{level.strength}</span>
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
-                    <div className={`${!isPremium ? "opacity-30 blur-sm pointer-events-none" : ""}`}>
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <Zap size={20} className="text-success" />
-                          <span className="font-semibold">
-                            Signal {signal.direction === "up" ? "ACHAT" : "VENTE"} — {signal.probability}%
-                          </span>
-                        </div>
-                        <span className="text-lg font-bold font-mono text-success">{signal.probability}%</span>
-                      </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                        <div className="rounded-lg bg-background border border-border p-3">
-                          <p className="text-[10px] text-text-muted uppercase font-semibold mb-1 flex items-center gap-1">
-                            <Target size={10} /> Point d&apos;entrée
-                          </p>
-                          <p className="text-lg font-bold font-mono text-text">${signal.entryPrice.toFixed(2)}</p>
-                        </div>
-                        <div className="rounded-lg bg-background border border-border p-3">
-                          <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Stop Loss</p>
-                          <p className={`text-lg font-bold font-mono ${signal.direction === "up" ? "text-danger" : "text-success"}`}>
-                            ${signal.stopLoss.toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-background border border-border p-3">
-                          <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Take Profit</p>
-                          <p className={`text-lg font-bold font-mono ${signal.direction === "up" ? "text-success" : "text-danger"}`}>
-                            ${signal.takeProfit.toFixed(2)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-background border border-border p-3">
-                          <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Ampleur</p>
-                          <p className="text-lg font-bold font-mono text-text">{signal.magnitude}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-xs text-text-secondary bg-background rounded-lg px-3 py-2 border border-border">
-                        <BarChart3 size={12} className="text-primary" />
-                        <span>Signal détecté il y a {Math.round((Date.now() - signal.detectedAt) / 1000)}s sur {signal.index.label}</span>
-                      </div>
+                    <div className="flex items-center gap-2 text-xs text-text-secondary bg-background rounded-lg px-3 py-2 border border-border">
+                      <BarChart3 size={12} className="text-primary" />
+                      <span>Signal détecté il y a {Math.round((Date.now() - signal.detectedAt) / 1000)}s sur {signal.index.label}</span>
                     </div>
                   </div>
                 </>
