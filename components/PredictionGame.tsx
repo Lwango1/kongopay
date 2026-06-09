@@ -1,23 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import {
   Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3,
-  ExternalLink, CheckCircle, Clock, Target, Zap, Lock, Crown, Wifi, WifiOff,
+  ExternalLink, Zap, Wifi, WifiOff,
 } from "lucide-react";
 import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
-import type { Candlestick, Signal } from "@/lib/deriv";
+import type { Candlestick, Signal, IndexType } from "@/lib/deriv";
 import { initDerivClient, getDerivState, predictSpike, getCandlesticks } from "@/lib/deriv";
+import { useAuth } from "@/context/AuthContext";
+import { apiFetch } from "@/lib/api";
 
 interface SRLevel {
   price: number;
   strength: number;
   type: "support" | "resistance";
 }
-import type { IndexType } from "@/lib/deriv";
-import { useAuth } from "@/context/AuthContext";
-import { apiFetch } from "@/lib/api";
 
 interface IndexInfo {
   type: IndexType; number: number; icon: any; color: string; label: string; symbol: string;
@@ -59,7 +57,6 @@ const MIN_PROBABILITY = 75;
 
 export default function PredictionGame() {
   const { user } = useAuth();
-  const router = useRouter();
   const [connected, setConnected] = useState(false);
   const [activeSignals, setActiveSignals] = useState<DetectedSignal[]>([]);
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
@@ -110,7 +107,7 @@ export default function PredictionGame() {
           stopLoss: p.stopLoss ?? 0,
           takeProfit: p.takeProfit ?? 0,
           magnitude: p.estimatedMagnitude ?? "0%",
-          timeSinceSpike: p.timeSinceSpike ?? 0,
+          timeSinceSpike: p.timeSinceLastSpike ?? 0,
           detectedAt: now,
           upScore: p.upScore,
           downScore: p.downScore,
