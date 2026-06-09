@@ -364,7 +364,7 @@ function atr(prices: number[], period: number = ATR_PERIOD): number {
   return sum / period;
 }
 
-function rsi(prices: number[], period: number = 8): number {
+function rsi(prices: number[], period: number = 14): number {
   if (prices.length < period + 1) return 50;
   const recent = prices.slice(-period - 1);
   let gains = 0, losses = 0;
@@ -541,10 +541,10 @@ function scoreSignal(
   const exhaustionScore = consecutive >= 4 ? 0.3 : 0;
 
   let rsiScore = 0;
-  if (isUp && rsiVal < 35) rsiScore = 0.3;
-  else if (!isUp && rsiVal > 65) rsiScore = 0.3;
-  else if (isUp && rsiVal < 45) rsiScore = 0.15;
-  else if (!isUp && rsiVal > 55) rsiScore = 0.15;
+  if (isUp && rsiVal < 15) rsiScore = 0.4;
+  else if (!isUp && rsiVal > 85) rsiScore = 0.4;
+  else if (isUp && rsiVal < 25) rsiScore = 0.2;
+  else if (!isUp && rsiVal > 75) rsiScore = 0.2;
 
   let marketScore = 0;
   if (isUp && market.trend === "uptrend") marketScore = 0.2;
