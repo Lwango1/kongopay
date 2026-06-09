@@ -7,6 +7,7 @@ import PredictionGame from "@/components/PredictionGame";
 import MarketScanner from "@/components/MarketScanner";
 import Converter from "@/components/Converter";
 import PriceAlert from "@/components/PriceAlert";
+import AdBanner from "@/components/AdBanner";
 import Footer from "@/components/Footer";
 
 export default function Home() {
@@ -16,8 +17,10 @@ export default function Home() {
       <main>
         <Hero />
         <Features />
+        <AdBanner slot="1234567890" className="py-8 max-w-4xl mx-auto" />
         <MarketScanner />
         <MarketOverview />
+        <AdBanner slot="1234567891" format="horizontal" className="py-8 mx-auto flex justify-center" />
         <TradingMockup />
         <PredictionGame />
         <Converter />
