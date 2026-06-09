@@ -343,6 +343,22 @@ class DerivLiveService {
     const volatilityFactor = 1000 / num;
     const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * volatilityFactor * 100).toFixed(1);
 
+    const atr = this.calculateATR(history, 14);
+    const isUp = expectedDirection === 'up';
+    const entryPrice = isUp
+      ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
+      : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
+    const slBuffer = Math.max(atr * 0.6, currentPrice * 0.003);
+    const tpBuffer = Math.max(atr * 1.8, currentPrice * 0.008);
+    const stopLoss = isUp
+      ? Math.min(entryPrice * 0.996, entryPrice - slBuffer)
+      : Math.max(entryPrice * 1.004, entryPrice + slBuffer);
+    const takeProfit = isUp
+      ? Math.max(entryPrice + tpBuffer, currentPrice + atr * 0.8)
+      : Math.min(entryPrice - tpBuffer, currentPrice - atr * 0.8);
+
+    const signal = isUp ? (spikeProbability >= 85 ? 'STRONG_BUY' : spikeProbability >= 75 ? 'BUY' : 'WATCH') : (spikeProbability >= 85 ? 'STRONG_SELL' : spikeProbability >= 75 ? 'SELL' : 'WATCH');
+
     return {
       type,
       number: num,
@@ -366,6 +382,10 @@ class DerivLiveService {
         strength: l.strength,
         type: l.type,
       })),
+      entryPrice: Math.round(entryPrice * 100) / 100,
+      stopLoss: Math.round(stopLoss * 100) / 100,
+      takeProfit: Math.round(takeProfit * 100) / 100,
+      signal,
       connected: st.connected,
       timestamp: Date.now(),
     };

@@ -39,6 +39,10 @@ interface SpikePrediction {
   distancePercent?: number;
   consecutiveMoves?: number;
   sRlevels?: SRLevel[];
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  signal?: string;
   error?: string;
 }
 
@@ -256,12 +260,14 @@ export default function DerivChart() {
             </div>
             <FullChart data={chartData(expanded)} color={expanded.startsWith("BOOM") ? "#22c55e" : "#fb7185"} label={expanded!} />
             {spikes[expanded] && !spikes[expanded]?.error && (
-              <div className={`mt-4 p-3 rounded-lg border text-sm ${spikes[expanded].isSpikeImminent ? "border-red-500/40 bg-red-500/10" : "bg-background border-border"}`}>
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold flex items-center gap-2">
-                    <AlertTriangle size={16} className={spikes[expanded].isSpikeImminent ? "text-danger" : "text-warning"} />
-                    Spike Predictor
-                  </span>
+              <div className={`mt-4 p-4 rounded-xl border ${spikes[expanded].isSpikeImminent ? "border-red-500/40 bg-red-500/10" : "bg-background border-border"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    {expanded.startsWith("BOOM") ? <Flame size={16} className="text-success" /> : <Droplet size={16} className="text-danger" />}
+                    <span className="font-bold text-sm">
+                      {INDICES.find(i => `${i.type}_${i.number}` === expanded)?.label} — Analyse Algorithmique
+                    </span>
+                  </div>
                   <span className={`font-bold font-mono text-lg ${spikes[expanded].isSpikeImminent ? "text-danger" : spikes[expanded].spikeProbability > 50 ? "text-warning" : "text-success"}`}>
                     {spikes[expanded].spikeProbability}%
                   </span>
@@ -269,24 +275,55 @@ export default function DerivChart() {
                 <div className="w-full h-1.5 bg-surface-light rounded-full mt-2 overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${spikes[expanded].spikeProbability}%`, background: spikes[expanded].isSpikeImminent ? "#ef4444" : spikes[expanded].spikeProbability > 50 ? "#f59e0b" : "#22c55e" }} />
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs text-text-secondary">
-                  <div><span className="text-text-muted">Direction </span><span className="font-semibold text-text capitalize">{spikes[expanded].expectedDirection === "up" ? "Hausse ↗" : "Baisse ↘"}</span></div>
-                  <div><span className="text-text-muted">Ampleur </span><span className="font-semibold text-text">{spikes[expanded].estimatedMagnitude}</span></div>
-                  <div><span className="text-text-muted">Dernier spike </span><span className="font-semibold text-text">il y a {spikes[expanded].timeSinceLastSpike}s</span></div>
-                  <div>
-                    <span className="text-text-muted">{expanded.startsWith("BOOM") ? "Dernier bas" : "Dernier haut"} </span>
-                    <span className="font-semibold text-text font-mono">
-                      ${spikes[expanded].referenceLevel?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
-                    </span>
+
+                <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-text-secondary">
+                  <div className={`rounded-lg border p-2.5 ${spikes[expanded].expectedDirection === "up" ? "bg-success/5 border-success/20" : "bg-surface-light border-border"}`}>
+                    <div className="text-text-muted text-[10px] uppercase font-semibold">Hausse (support)</div>
+                    <div className="font-bold font-mono text-success">{spikes[expanded].spikeProbability}%</div>
+                    <div className="text-[9px] text-text-muted mt-0.5">
+                      {expanded.startsWith("BOOM") ? "Proche du support → rebond probable" : "Éloigné de la résistance"}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg border p-2.5 ${spikes[expanded].expectedDirection === "down" ? "bg-danger/5 border-danger/20" : "bg-surface-light border-border"}`}>
+                    <div className="text-text-muted text-[10px] uppercase font-semibold">Baisse (résistance)</div>
+                    <div className="font-bold font-mono text-danger">{Math.round(spikes[expanded].spikeProbability * (expanded.startsWith("CRASH") ? 0.85 : 0.4))}%</div>
+                    <div className="text-[9px] text-text-muted mt-0.5">
+                      {expanded.startsWith("CRASH") ? "Proche de la résistance → retournement probable" : "Support solide en dessous"}
+                    </div>
                   </div>
                 </div>
-                {spikes[expanded].consecutiveMoves !== undefined && (
-                  <div className="mt-2 text-[10px] text-text-muted">
-                    Mouvements consécutifs opposés : {spikes[expanded].consecutiveMoves}/5 • 
-                    Distance du niveau : {spikes[expanded].distancePercent ?? 0}% • 
-                    Force S/R : {spikes[expanded].referenceStrength ?? 0} touches
+
+                <div className="grid grid-cols-3 gap-2 mt-3">
+                  <div className="rounded-lg bg-success/5 border border-success/20 p-2.5 text-center">
+                    <p className="text-[9px] text-text-muted uppercase font-semibold">Entrée</p>
+                    <p className="font-bold font-mono text-xs text-text mt-0.5">
+                      ${spikes[expanded].entryPrice?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                    </p>
                   </div>
-                )}
+                  <div className="rounded-lg bg-danger/5 border border-danger/20 p-2.5 text-center">
+                    <p className="text-[9px] text-text-muted uppercase font-semibold">Stop Loss</p>
+                    <p className="font-bold font-mono text-xs text-danger mt-0.5">
+                      ${spikes[expanded].stopLoss?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-success/5 border border-success/20 p-2.5 text-center">
+                    <p className="text-[9px] text-text-muted uppercase font-semibold">Take Profit</p>
+                    <p className="font-bold font-mono text-xs text-success mt-0.5">
+                      ${spikes[expanded].takeProfit?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-3 p-2.5 rounded-lg bg-surface-light/50 border border-border text-[10px] text-text-secondary leading-relaxed">
+                  <span className="font-semibold text-text-muted">Raisonnement : </span>
+                  {spikes[expanded].consecutiveMoves !== undefined && (
+                    <>{spikes[expanded].consecutiveMoves} mouvements consécutifs opposés • </>
+                  )}
+                  Distance du niveau S/R : {spikes[expanded].distancePercent ?? 0}% • 
+                  Force S/R : {spikes[expanded].referenceStrength ?? 0} touches • 
+                  Dernier spike il y a {spikes[expanded].timeSinceLastSpike}s
+                </div>
+
                 {spikes[expanded].sRlevels && spikes[expanded].sRlevels.length > 0 && (
                   <div className="mt-3">
                     <div className="text-[10px] font-semibold text-text-muted uppercase mb-1.5">Niveaux S/R détectés</div>
