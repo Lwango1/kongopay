@@ -155,7 +155,11 @@ export default function PredictionGame() {
   }, [selectedSignal]);
 
   useEffect(() => {
-    if (!chartRef.current || chartApiRef.current) return;
+    if (!chartRef.current) return;
+    if (chartApiRef.current) {
+      chartApiRef.current.applyOptions({ width: chartRef.current.clientWidth, height: 260 });
+      return;
+    }
     const chart = createChart(chartRef.current, {
       layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#a0aec0" },
       grid: { vertLines: { color: "#2d3748" }, horzLines: { color: "#2d3748" } },
@@ -174,7 +178,7 @@ export default function PredictionGame() {
     const handleResize = () => { if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth }); };
     window.addEventListener("resize", handleResize);
     return () => { window.removeEventListener("resize", handleResize); chart.remove(); chartApiRef.current = null; seriesRef.current = null; };
-  }, []);
+  }, [selectedSignal]);
 
   useEffect(() => {
     if (seriesRef.current && candles.length > 0) {
