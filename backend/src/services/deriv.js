@@ -401,6 +401,97 @@ class DerivLiveService {
     };
   }
 
+  calculateATR(history, period = 14) {
+    if (history.length < period + 1) return 0;
+    const trs = [];
+    for (let i = history.length - period; i < history.length; i++) {
+      const high = Math.max(history[i], history[i - 1] || history[i]);
+      const low = Math.min(history[i], history[i - 1] || history[i]);
+      trs.push(high - low);
+    }
+    return trs.reduce((a, b) => a + b, 0) / trs.length;
+  }
+
+  calculateMFI(history, period = 14) {
+    if (history.length < period + 1) return 50;
+    const recent = history.slice(-period);
+    let positive = 0;
+    let negative = 0;
+    for (let i = 1; i < recent.length; i++) {
+      if (recent[i] > recent[i - 1]) positive += recent[i];
+      else negative += recent[i];
+    }
+    if (negative === 0) return 100;
+    const ratio = positive / negative;
+    return Math.round(100 - (100 / (1 + ratio)));
+  }
+
+  calculateMomentum(history, period = 10) {
+    if (history.length < period) return 0;
+    const slice = history.slice(-period);
+    return (slice[slice.length - 1] - slice[0]) / slice[0];
+  }
+
+  generateSignal(type, num) {
+    const prediction = this.predictSpike(type, num);
+    if (prediction.error || !prediction.isSpikeImminent) return null;
+
+    const key = getKey(type, num);
+    const st = this.stateMap.get(key);
+    const history = st.history;
+    const atr = this.calculateATR(history);
+    const atrRatio = atr / (prediction.currentPrice || 1);
+
+    const dynamicSLMultiplier = type === 'BOOM' ? 1.5 : 1.5;
+    const dynamicTPMultiplier = type === 'BOOM' ? 2.5 : 2.5;
+    const slDistance = Math.max(atr * dynamicSLMultiplier, prediction.currentPrice * 0.005);
+    const tpDistance = atr * dynamicTPMultiplier;
+
+    const upScore = prediction.expectedDirection === 'up' ? prediction.spikeProbability : 100 - prediction.spikeProbability;
+    const downScore = prediction.expectedDirection === 'down' ? prediction.spikeProbability : 100 - prediction.spikeProbability;
+    const signal = upScore > downScore ? 'STRONG_BUY' : 'STRONG_SELL';
+
+    const entryPrice = prediction.currentPrice;
+    const stopLoss = signal === 'STRONG_BUY' ? entryPrice - slDistance : entryPrice + slDistance;
+    const takeProfit = signal === 'STRONG_BUY' ? entryPrice + tpDistance : entryPrice - tpDistance;
+
+    return {
+      ...prediction,
+      signal,
+      entryPrice: Math.round(entryPrice * 100) / 100,
+      stopLoss: Math.round(stopLoss * 100) / 100,
+      takeProfit: Math.round(takeProfit * 100) / 100,
+      upScore,
+      downScore,
+      rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
+      features: {
+        rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
+        atr_ratio: atrRatio,
+        volume: st.history.length > 100 ? (st.history.slice(-100).reduce((a, b) => a + b, 0) / st.history.slice(-100).length) / (prediction.currentPrice || 1) : 0.5,
+        price_position: prediction.pricePosition / 100,
+        consecutive_moves: prediction.consecutiveMoves / 10,
+        time_since_spike: Math.min((prediction.timeSinceLastSpike || 999) / 100, 1),
+        momentum: this.calculateMomentum(history),
+        sr_distance: prediction.distancePercent / 100,
+        mfi: this.calculateMFI(history) / 100,
+        macd_histogram: 0.5,
+      },
+    };
+  }
+
+  async emitSignal(type, num) {
+    const signal = this.generateSignal(type, num);
+    if (!signal) return null;
+
+    const { signalTracker } = await import('./signalTracker.js');
+    const saved = await signalTracker.recordSignal(signal);
+    if (saved) {
+      const { telegramService } = await import('./telegram.js');
+      await telegramService.broadcastSignal(saved);
+    }
+    return saved;
+  }
+
   scanAllMarkets() {
     const opportunities = [];
 

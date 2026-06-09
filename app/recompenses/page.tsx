@@ -10,6 +10,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
+import TelegramAlert from "@/components/TelegramAlert";
 
 interface EngagementProfile {
   userId: string;
@@ -217,6 +218,10 @@ export default function RecompensesPage() {
                 )}
               </button>
             </div>
+          </div>
+
+          <div className="mb-6">
+            <TelegramAlert />
           </div>
 
           <div className="grid md:grid-cols-2 gap-6 mb-8">

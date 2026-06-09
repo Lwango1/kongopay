@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { label: "Récompenses", href: "/recompenses" },
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
+  { label: "Performance", href: "/performance" },
   { label: "Apprendre", href: "/apprendre" },
 ];
 

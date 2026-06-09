@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
     "ccxt": "^4.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
