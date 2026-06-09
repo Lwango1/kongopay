@@ -303,16 +303,16 @@ export default function PredictionGame() {
                     <p className="font-semibold text-text">Signal Premium</p>
                     <p className="text-xs text-text-secondary text-center">
                       {signalUsage.remaining > 0
-                        ? `Il te reste ${signalUsage.remaining} signal${signalUsage.remaining > 1 ? 'x' : ''} gratuit aujourd'hui`
+                        ? `Il te reste ${signalUsage.remaining} signal${signalUsage.remaining > 1 ? 'x' : ''} gratuit aujourd'hui sur 4`
                         : "Abonne-toi pour voir les signaux en temps réel"}
                     </p>
                     {signalUsage.remaining > 0 ? (
                       <span className="bg-primary/20 text-primary px-4 py-1.5 rounded-lg text-xs font-semibold">
-                        {signalUsage.remaining} gratuit{signalUsage.remaining > 1 ? 's' : ''} aujourd'hui
+                        {signalUsage.remaining}/{4} gratuit{signalUsage.remaining > 1 ? 's' : ''}
                       </span>
                     ) : (
                       <a href="/recompenses" className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors">
-                        Devenir Premium
+                        Premium — 10 $/mois
                       </a>
                     )}
                   </div>

@@ -2,7 +2,8 @@ import { db, admin } from '../config/firebase.js';
 
 const SUBSCRIPTION_COLLECTION = 'subscriptions';
 
-const FREE_SIGNALS_PER_DAY = 3;
+const FREE_SIGNALS_PER_DAY = 4;
+const PREMIUM_PRICE_MONTHLY = 10;
 
 export class SubscriptionService {
   async getStatus(userId) {

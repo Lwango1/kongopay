@@ -35,6 +35,14 @@ router.get('/signal-usage', authenticate, async (req, res, next) => {
   }
 });
 
+router.get('/config', (req, res) => {
+  res.json({
+    freeSignalsPerDay: 4,
+    premiumPriceMonthly: 10,
+    premiumPriceCurrency: 'USD',
+  });
+});
+
 router.post('/set-premium', authenticate, requireAdmin, async (req, res, next) => {
   try {
     const { userId, days } = req.body;
