@@ -61,8 +61,14 @@ function keyFromSymbol(symbol: string): string | null {
 }
 
 const stateMap = new Map<string, IndexState>();
-const candleMap = new Map<string, Candlestick[]>();
+const candleMap1m = new Map<string, Candlestick[]>();
+const candleMap5m = new Map<string, Candlestick[]>();
+const candleMap15m = new Map<string, Candlestick[]>();
 const priceAt24hAgo = new Map<string, number>();
+
+function initCandleMap(map: Map<string, Candlestick[]>) {
+  for (const idx of INDICES) map.set(getKey(idx.type, idx.number), []);
+}
 
 for (const idx of INDICES) {
   stateMap.set(getKey(idx.type, idx.number), {
@@ -78,8 +84,10 @@ for (const idx of INDICES) {
     prevSignalTime: 0,
     confirmationTriggered: false,
   });
-  candleMap.set(getKey(idx.type, idx.number), []);
 }
+initCandleMap(candleMap1m);
+initCandleMap(candleMap5m);
+initCandleMap(candleMap15m);
 
 let ws: any = null;
 let wsConnected = false;
@@ -101,29 +109,31 @@ function createWebSocket(url: string): any {
   return new WebSocket(url);
 }
 
-const CANDLE_INTERVAL = 60; // 1 minute candles in seconds
+const CANDLE_INTERVALS = [
+  { seconds: 60, map: candleMap1m, label: "1m" },
+  { seconds: 300, map: candleMap5m, label: "5m" },
+  { seconds: 900, map: candleMap15m, label: "15m" },
+];
 
-function updateCandle(key: string, price: number, timeMs: number) {
-  const candles = candleMap.get(key);
-  if (!candles) return;
-
-  const candleTime = Math.floor(timeMs / 1000 / CANDLE_INTERVAL) * CANDLE_INTERVAL;
-
-  if (candles.length === 0 || candles[candles.length - 1].time !== candleTime) {
-    candles.push({
-      time: candleTime,
-      open: price,
-      high: price,
-      low: price,
-      close: price,
-    });
-    if (candles.length > 200) candles.shift();
-  } else {
-    const last = candles[candles.length - 1];
-    last.high = Math.max(last.high, price);
-    last.low = Math.min(last.low, price);
-    last.close = price;
+function updateCandleMulti(key: string, price: number, timeMs: number) {
+  for (const { seconds, map } of CANDLE_INTERVALS) {
+    const candles = map.get(key);
+    if (!candles) continue;
+    const candleTime = Math.floor(timeMs / 1000 / seconds) * seconds;
+    if (candles.length === 0 || candles[candles.length - 1].time !== candleTime) {
+      candles.push({ time: candleTime, open: price, high: price, low: price, close: price });
+      if (candles.length > 200) candles.shift();
+    } else {
+      const last = candles[candles.length - 1];
+      last.high = Math.max(last.high, price);
+      last.low = Math.min(last.low, price);
+      last.close = price;
+    }
   }
+}
+
+function candlePrices(map: Map<string, Candlestick[]>, key: string): number[] {
+  return (map.get(key) || []).map(c => c.close);
 }
 
 function onTick(symbol: string, quote: number, epoch: number) {
@@ -147,7 +157,7 @@ function onTick(symbol: string, quote: number, epoch: number) {
   st.timestamps.push(ts);
   st.connected = true;
 
-  updateCandle(key, quote, ts);
+  updateCandleMulti(key, quote, ts);
 
   if (st.history.length > 500) {
     st.history.shift();
@@ -583,7 +593,35 @@ export function predictSpike(type: IndexType, num: number) {
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   const recoveryTime = Math.min(msSinceLastSpike / 60000, 1);
-  const probability = Math.min((bestScore * 0.85 + recoveryTime * 0.15) * 100, 97);
+  let probability = Math.min((bestScore * 0.85 + recoveryTime * 0.15) * 100, 97);
+
+  // Multi-timeframe confirmation (5m, 15m)
+  const prices5m = candlePrices(candleMap5m, key);
+  const prices15m = candlePrices(candleMap15m, key);
+  let tfBonus = 0;
+  if (prices5m.length > 10) {
+    const vol5m = atr(prices5m);
+    const rsi5m = rsi(prices5m);
+    const market5m = analyzeMarketStructure(prices5m);
+    const { nearestSupport: s5, nearestResistance: r5 } = findSupportResistance(prices5m, currentPrice);
+    const up5 = scoreSignal(currentPrice, s5?.price ?? null, s5?.strength ?? 0, prices5m, true, rsi5m, market5m);
+    const dn5 = scoreSignal(currentPrice, r5?.price ?? null, r5?.strength ?? 0, prices5m, false, rsi5m, market5m);
+    const agree5m = isUp ? (up5.score >= dn5.score) : (dn5.score >= up5.score);
+    if (agree5m) tfBonus += 0.12;
+    else tfBonus -= 0.08;
+  }
+  if (prices15m.length > 10) {
+    const vol15m = atr(prices15m);
+    const rsi15m = rsi(prices15m);
+    const market15m = analyzeMarketStructure(prices15m);
+    const { nearestSupport: s15, nearestResistance: r15 } = findSupportResistance(prices15m, currentPrice);
+    const up15 = scoreSignal(currentPrice, s15?.price ?? null, s15?.strength ?? 0, prices15m, true, rsi15m, market15m);
+    const dn15 = scoreSignal(currentPrice, r15?.price ?? null, r15?.strength ?? 0, prices15m, false, rsi15m, market15m);
+    const agree15m = isUp ? (up15.score >= dn15.score) : (dn15.score >= up15.score);
+    if (agree15m) tfBonus += 0.08;
+    else tfBonus -= 0.05;
+  }
+  probability = Math.min(Math.max(probability + tfBonus * 100, 0), 97);
 
   const volFactor = num === 1000 ? 0.6 : num === 900 ? 0.8 : 1;
   const magnitudePct = (0.008 + bestScore * 0.04) * volFactor;
@@ -597,8 +635,8 @@ export function predictSpike(type: IndexType, num: number) {
   const bestConsecutive = isUp ? upScore.consecutive : downScore.consecutive;
 
   let signal: Signal = "NEUTRAL";
-  if (probability >= 82) signal = isUp ? "STRONG_BUY" : "STRONG_SELL";
-  else if (probability >= 62) signal = isUp ? "BUY" : "SELL";
+  if (probability >= 85) signal = isUp ? "STRONG_BUY" : "STRONG_SELL";
+  else if (probability >= 75) signal = isUp ? "BUY" : "SELL";
 
   const entryLevel = isUp
     ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
@@ -660,7 +698,7 @@ export function predictSpike(type: IndexType, num: number) {
     expectedDirection: expDir,
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: probability > 72,
+    isSpikeImminent: probability >= 75,
     pricePosition: pricePos,
     consecutiveMoves: bestConsecutive,
     rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
@@ -714,7 +752,13 @@ export function predictNextTick(type: IndexType, num: number) {
 }
 
 export function getCandlesticks(type: IndexType, num: number): Candlestick[] {
-  return candleMap.get(getKey(type, num)) || [];
+  return candleMap1m.get(getKey(type, num)) || [];
+}
+
+export function getCandlesticksByTF(type: IndexType, num: number, tf: "1m" | "5m" | "15m"): Candlestick[] {
+  const key = getKey(type, num);
+  const map = tf === "15m" ? candleMap15m : tf === "5m" ? candleMap5m : candleMap1m;
+  return map.get(key) || [];
 }
 
 export interface MarketOpportunity {
