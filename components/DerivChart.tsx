@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Area, AreaChart,
@@ -9,17 +9,8 @@ import {
   TrendingUp, AlertTriangle, Flame, Droplet,
   Maximize2, Minimize2, Pause, Play, Wifi, WifiOff,
 } from "lucide-react";
-
-interface IndexData {
-  price: number;
-  change24h: number;
-  history: number[];
-  type: string;
-  number: number;
-  lastSpikeTime: number;
-  lastSpikeDirection: "up" | "down" | null;
-  connected: boolean;
-}
+import { initDerivClient, getDerivState, predictSpike } from "@/lib/deriv";
+import type { IndexType } from "@/lib/deriv";
 
 interface SRLevel {
   price: number;
@@ -47,12 +38,12 @@ interface SpikePrediction {
 }
 
 const INDICES = [
-  { type: "BOOM", number: 500, label: "Boom 500", color: "#22c55e" },
-  { type: "BOOM", number: 900, label: "Boom 900", color: "#16a34a" },
-  { type: "BOOM", number: 1000, label: "Boom 1000", color: "#15803d" },
-  { type: "CRASH", number: 500, label: "Crash 500", color: "#fb7185" },
-  { type: "CRASH", number: 900, label: "Crash 900", color: "#f43f5e" },
-  { type: "CRASH", number: 1000, label: "Crash 1000", color: "#be123c" },
+  { type: "BOOM" as IndexType, number: 500, label: "Boom 500", color: "#22c55e" },
+  { type: "BOOM" as IndexType, number: 900, label: "Boom 900", color: "#16a34a" },
+  { type: "BOOM" as IndexType, number: 1000, label: "Boom 1000", color: "#15803d" },
+  { type: "CRASH" as IndexType, number: 500, label: "Crash 500", color: "#fb7185" },
+  { type: "CRASH" as IndexType, number: 900, label: "Crash 900", color: "#f43f5e" },
+  { type: "CRASH" as IndexType, number: 1000, label: "Crash 1000", color: "#be123c" },
 ];
 
 function MiniChart({ data, color }: { data: number[]; color: string }) {
@@ -106,66 +97,62 @@ function FullChart({ data, color, label }: { data: { t: string; p: number }[]; c
 }
 
 export default function DerivChart() {
-  const [state, setState] = useState<Record<string, IndexData> | null>(null);
-  const [spikes, setSpikes] = useState<Record<string, SpikePrediction>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [appIdMissing, setAppIdMissing] = useState(false);
-  const pausedRef = useRef(paused);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const pausedRef = useRef(paused);
+  const [renderTick, setRenderTick] = useState(0);
 
   pausedRef.current = paused;
 
-  const fetchData = useCallback(async () => {
-    if (pausedRef.current) return;
-    try {
-      const res = await fetch("/api/deriv/state");
-      if (res.ok) {
-        const data = await res.json();
-        setConnected(data.source === "deriv-live");
-        const { timestamp, source, ...indices } = data;
-        setState(indices);
-      }
-      const spikePromises = INDICES.map(async (idx) => {
-        const key = `${idx.type}_${idx.number}`;
-        const res = await fetch(`/api/deriv/spike?type=${idx.type}&number=${idx.number}`);
-        if (res.ok) {
-          const data = await res.json();
-          return [key, data.prediction ?? data] as const;
-        }
-        return null;
-      });
-      const results = await Promise.all(spikePromises);
-      const spikeMap: Record<string, SpikePrediction> = {};
-      for (const r of results) {
-        if (r) spikeMap[r[0]] = r[1];
-      }
-      setSpikes(spikeMap);
-      const hasMissingAppId = Object.values(spikeMap).some((s: any) => s?.error?.includes("DERIV_APP_ID") || s?.error?.includes("pas assez"));
-      setAppIdMissing(hasMissingAppId);
-    } catch { /* ignore */ }
-  }, []);
+  useEffect(() => { initDerivClient(); }, []);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 1000);
+    if (pausedRef.current) return;
+    const interval = setInterval(() => setRenderTick(t => t + 1), 1000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, []);
 
-  const chartData = (key: string): { t: string; p: number }[] => {
-    if (!state?.[key]) return [];
-    return state[key].history.map((p: number, i: number) => ({
-      t: `-${state[key].history.length - i}`,
-      p,
-    }));
+  const derivState = getDerivState();
+  const source = derivState.source;
+  const connected = source === "deriv-live";
+
+  const getIdx = (key: string) => INDICES.find(i => `${i.type}_${i.number}` === key);
+
+  const currentPrice = (key: string) => {
+    const label = key.toLowerCase();
+    return (derivState as any)[label]?.price ?? 0;
+  };
+  const currentChange = (key: string) => {
+    const label = key.toLowerCase();
+    return (derivState as any)[label]?.change24h ?? 0;
+  };
+  const currentHistory = (key: string): number[] => {
+    const label = key.toLowerCase();
+    return (derivState as any)[label]?.history ?? [];
+  };
+  const idxConnected = (key: string): boolean => {
+    const label = key.toLowerCase();
+    return (derivState as any)[label]?.connected ?? false;
+  };
+  const anyConnected = INDICES.some(i => idxConnected(`${i.type}_${i.number}`));
+
+  const getPrediction = (key: string): SpikePrediction | null => {
+    const idx = getIdx(key);
+    if (!idx) return null;
+    const pred = predictSpike(idx.type, idx.number);
+    if (!pred || "error" in pred) return null;
+    return pred as SpikePrediction;
   };
 
-  const currentPrice = (key: string) => state?.[key]?.price ?? 0;
-  const currentChange = (key: string) => state?.[key]?.change24h ?? 0;
-  const isAnyConnected = Object.values(state ?? {}).some((s) => s.connected);
+  const chartData = (key: string): { t: string; p: number }[] => {
+    const h = currentHistory(key);
+    return h.map((p, i) => ({ t: `-${h.length - i}`, p }));
+  };
 
-  if (!state) {
+  const expandedPrediction = expanded ? getPrediction(expanded) : null;
+
+  if (!derivState) {
     return (
       <section className="py-20 px-4 border-t border-border">
         <div className="max-w-7xl mx-auto">
@@ -193,9 +180,9 @@ export default function DerivChart() {
                 <TrendingUp className="text-primary" size={32} />
                 Indices Synthétiques Deriv
               </h2>
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${isAnyConnected ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}`}>
-                {isAnyConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-                {isAnyConnected ? "Live" : "Déconnecté"}
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${anyConnected ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}`}>
+                {anyConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+                {anyConnected ? "Live" : "Déconnecté"}
               </div>
             </div>
             <p className="text-text-secondary mt-2">Boom & Crash — API Deriv (WebSocket) en temps réel</p>
@@ -221,16 +208,7 @@ export default function DerivChart() {
           </div>
         </div>
 
-        {appIdMissing && (
-          <div className="mb-6 p-4 rounded-xl border border-warning/30 bg-warning/5">
-            <p className="text-sm text-warning font-semibold mb-1">Token Deriv manquant</p>
-            <p className="text-xs text-text-secondary">
-              Ajoutez <code className="px-1 py-0.5 bg-surface-light rounded text-xs">NEXT_PUBLIC_DERIV_TOKEN=votre_token</code> dans <code className="px-1 py-0.5 bg-surface-light rounded text-xs">.env.local</code>.
-            </p>
-          </div>
-        )}
-
-        {!isAnyConnected && !appIdMissing && (
+        {!connected && (
           <div className="mb-6 p-4 rounded-xl border border-border bg-surface/50">
             <p className="text-sm text-text-secondary flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
@@ -239,13 +217,13 @@ export default function DerivChart() {
           </div>
         )}
 
-        {expanded && state[expanded] && (
+        {expanded && currentHistory(expanded).length > 0 && (
           <div className="rounded-xl border border-border bg-surface p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 {expanded.startsWith("BOOM") ? <Flame size={24} className="text-success" /> : <Droplet size={24} className="text-danger" />}
                 <div>
-                  <h3 className="font-bold text-lg">{INDICES.find(i => `${i.type}_${i.number}` === expanded)?.label}</h3>
+                  <h3 className="font-bold text-lg">{getIdx(expanded)?.label}</h3>
                   <div className="flex items-center gap-3 mt-1">
                     <span className="text-2xl font-bold font-mono">${currentPrice(expanded).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     <span className={`text-sm font-mono ${currentChange(expanded) >= 0 ? "text-success" : "text-danger"}`}>
@@ -258,35 +236,35 @@ export default function DerivChart() {
                 <Minimize2 size={18} className="text-text-muted" />
               </button>
             </div>
-            <FullChart data={chartData(expanded)} color={expanded.startsWith("BOOM") ? "#22c55e" : "#fb7185"} label={expanded!} />
-            {spikes[expanded] && !spikes[expanded]?.error && (
-              <div className={`mt-4 p-4 rounded-xl border ${spikes[expanded].isSpikeImminent ? "border-red-500/40 bg-red-500/10" : "bg-background border-border"}`}>
+            <FullChart data={chartData(expanded)} color={expanded.startsWith("BOOM") ? "#22c55e" : "#fb7185"} label={expanded} />
+            {expandedPrediction && (
+              <div className={`mt-4 p-4 rounded-xl border ${expandedPrediction.isSpikeImminent ? "border-red-500/40 bg-red-500/10" : "bg-background border-border"}`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     {expanded.startsWith("BOOM") ? <Flame size={16} className="text-success" /> : <Droplet size={16} className="text-danger" />}
                     <span className="font-bold text-sm">
-                      {INDICES.find(i => `${i.type}_${i.number}` === expanded)?.label} — Analyse Algorithmique
+                      {getIdx(expanded)?.label} — Analyse Algorithmique
                     </span>
                   </div>
-                  <span className={`font-bold font-mono text-lg ${spikes[expanded].isSpikeImminent ? "text-danger" : spikes[expanded].spikeProbability > 50 ? "text-warning" : "text-success"}`}>
-                    {spikes[expanded].spikeProbability}%
+                  <span className={`font-bold font-mono text-lg ${expandedPrediction.isSpikeImminent ? "text-danger" : expandedPrediction.spikeProbability > 50 ? "text-warning" : "text-success"}`}>
+                    {expandedPrediction.spikeProbability}%
                   </span>
                 </div>
                 <div className="w-full h-1.5 bg-surface-light rounded-full mt-2 overflow-hidden">
-                  <div className="h-full rounded-full transition-all" style={{ width: `${spikes[expanded].spikeProbability}%`, background: spikes[expanded].isSpikeImminent ? "#ef4444" : spikes[expanded].spikeProbability > 50 ? "#f59e0b" : "#22c55e" }} />
+                  <div className="h-full rounded-full transition-all" style={{ width: `${expandedPrediction.spikeProbability}%`, background: expandedPrediction.isSpikeImminent ? "#ef4444" : expandedPrediction.spikeProbability > 50 ? "#f59e0b" : "#22c55e" }} />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-3 text-xs text-text-secondary">
-                  <div className={`rounded-lg border p-2.5 ${spikes[expanded].expectedDirection === "up" ? "bg-success/5 border-success/20" : "bg-surface-light border-border"}`}>
+                  <div className={`rounded-lg border p-2.5 ${expandedPrediction.expectedDirection === "up" ? "bg-success/5 border-success/20" : "bg-surface-light border-border"}`}>
                     <div className="text-text-muted text-[10px] uppercase font-semibold">Hausse (support)</div>
-                    <div className="font-bold font-mono text-success">{spikes[expanded].spikeProbability}%</div>
+                    <div className="font-bold font-mono text-success">{expandedPrediction.spikeProbability}%</div>
                     <div className="text-[9px] text-text-muted mt-0.5">
                       {expanded.startsWith("BOOM") ? "Proche du support → rebond probable" : "Éloigné de la résistance"}
                     </div>
                   </div>
-                  <div className={`rounded-lg border p-2.5 ${spikes[expanded].expectedDirection === "down" ? "bg-danger/5 border-danger/20" : "bg-surface-light border-border"}`}>
+                  <div className={`rounded-lg border p-2.5 ${expandedPrediction.expectedDirection === "down" ? "bg-danger/5 border-danger/20" : "bg-surface-light border-border"}`}>
                     <div className="text-text-muted text-[10px] uppercase font-semibold">Baisse (résistance)</div>
-                    <div className="font-bold font-mono text-danger">{Math.round(spikes[expanded].spikeProbability * (expanded.startsWith("CRASH") ? 0.85 : 0.4))}%</div>
+                    <div className="font-bold font-mono text-danger">{Math.round(expandedPrediction.spikeProbability * (expanded.startsWith("CRASH") ? 0.85 : 0.4))}%</div>
                     <div className="text-[9px] text-text-muted mt-0.5">
                       {expanded.startsWith("CRASH") ? "Proche de la résistance → retournement probable" : "Support solide en dessous"}
                     </div>
@@ -297,38 +275,38 @@ export default function DerivChart() {
                   <div className="rounded-lg bg-success/5 border border-success/20 p-2.5 text-center">
                     <p className="text-[9px] text-text-muted uppercase font-semibold">Entrée</p>
                     <p className="font-bold font-mono text-xs text-text mt-0.5">
-                      ${spikes[expanded].entryPrice?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                      ${expandedPrediction.entryPrice?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
                     </p>
                   </div>
                   <div className="rounded-lg bg-danger/5 border border-danger/20 p-2.5 text-center">
                     <p className="text-[9px] text-text-muted uppercase font-semibold">Stop Loss</p>
                     <p className="font-bold font-mono text-xs text-danger mt-0.5">
-                      ${spikes[expanded].stopLoss?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                      ${expandedPrediction.stopLoss?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
                     </p>
                   </div>
                   <div className="rounded-lg bg-success/5 border border-success/20 p-2.5 text-center">
                     <p className="text-[9px] text-text-muted uppercase font-semibold">Take Profit</p>
                     <p className="font-bold font-mono text-xs text-success mt-0.5">
-                      ${spikes[expanded].takeProfit?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
+                      ${expandedPrediction.takeProfit?.toLocaleString(undefined, { minimumFractionDigits: 2 }) ?? "—"}
                     </p>
                   </div>
                 </div>
 
                 <div className="mt-3 p-2.5 rounded-lg bg-surface-light/50 border border-border text-[10px] text-text-secondary leading-relaxed">
                   <span className="font-semibold text-text-muted">Raisonnement : </span>
-                  {spikes[expanded].consecutiveMoves !== undefined && (
-                    <>{spikes[expanded].consecutiveMoves} mouvements consécutifs opposés • </>
+                  {expandedPrediction.consecutiveMoves !== undefined && (
+                    <>{expandedPrediction.consecutiveMoves} mouvements consécutifs opposés • </>
                   )}
-                  Distance du niveau S/R : {spikes[expanded].distancePercent ?? 0}% • 
-                  Force S/R : {spikes[expanded].referenceStrength ?? 0} touches • 
-                  Dernier spike il y a {spikes[expanded].timeSinceLastSpike}s
+                  Distance du niveau S/R : {expandedPrediction.distancePercent ?? 0}% • 
+                  Force S/R : {expandedPrediction.referenceStrength ?? 0} touches • 
+                  Dernier spike il y a {expandedPrediction.timeSinceLastSpike}s
                 </div>
 
-                {spikes[expanded].sRlevels && spikes[expanded].sRlevels.length > 0 && (
+                {expandedPrediction.sRlevels && expandedPrediction.sRlevels.length > 0 && (
                   <div className="mt-3">
                     <div className="text-[10px] font-semibold text-text-muted uppercase mb-1.5">Niveaux S/R détectés</div>
                     <div className="flex flex-wrap gap-1.5">
-                      {spikes[expanded].sRlevels.map((level: SRLevel, i: number) => (
+                      {expandedPrediction.sRlevels.map((level: SRLevel, i: number) => (
                         <span key={i}
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium
                             ${level.type === "support"
@@ -354,21 +332,21 @@ export default function DerivChart() {
             const price = currentPrice(key);
             const change = currentChange(key);
             const isExpanded = expanded === key;
-            const spike = spikes[key];
-            const idxConnected = state?.[key]?.connected;
+            const spike = getPrediction(key);
+            const conn = idxConnected(key);
 
             return (
               <div
                 key={key}
                 className={`rounded-xl border transition-all cursor-pointer hover:border-primary/30 ${isExpanded ? "border-primary/40 bg-surface" : "bg-surface/50 border-border"}`}
-                onClick={() => !isExpanded && state?.[key]?.history?.length > 0 && setExpanded(key)}
+                onClick={() => !isExpanded && currentHistory(key).length > 0 && setExpanded(key)}
               >
                 <div className="p-4">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       {idx.type === "BOOM" ? <Flame size={16} style={{ color: idx.color }} /> : <Droplet size={16} style={{ color: idx.color }} />}
                       <span className="font-semibold text-sm">{idx.label}</span>
-                      {idxConnected && <span className="w-1.5 h-1.5 rounded-full bg-success" />}
+                      {conn && <span className="w-1.5 h-1.5 rounded-full bg-success" />}
                     </div>
                     <div className="flex items-center gap-2">
                       {spike?.isSpikeImminent && <AlertTriangle size={14} className="text-danger animate-pulse" />}
@@ -382,12 +360,12 @@ export default function DerivChart() {
                       ? `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                       : <span className="text-text-muted text-sm">En attente...</span>}
                   </div>
-                  {(state?.[key]?.history?.length ?? 0) > 1 ? (
-                    <MiniChart data={state[key].history} color={idx.color} />
+                  {currentHistory(key).length > 1 ? (
+                    <MiniChart data={currentHistory(key)} color={idx.color} />
                   ) : (
                     <div className="h-[60px] flex items-center justify-center text-text-muted text-xs">Données en attente...</div>
                   )}
-                  {spike && !spike.error && (
+                  {spike && (
                     <div className="mt-2 flex items-center gap-2 text-[10px]">
                       <div className="flex-1 h-1 rounded-full bg-surface-light overflow-hidden">
                         <div className="h-full rounded-full" style={{ width: `${spike.spikeProbability}%`, background: spike.isSpikeImminent ? "#ef4444" : "#f59e0b" }} />
@@ -417,7 +395,7 @@ export default function DerivChart() {
           <div className="rounded-xl border border-border bg-surface/50 p-4">
             <h4 className="text-xs font-semibold text-text-muted uppercase mb-2">Source</h4>
             <p className="text-xs text-text-secondary leading-relaxed">
-              Données live via l&apos;API WebSocket Deriv. {appIdMissing ? "Configurez votre DERIV_APP_ID pour activer le flux." : isAnyConnected ? "Connecté et en réception." : "Tentative de connexion..."}
+              Données live via l&apos;API WebSocket Deriv. {connected ? "Connecté et en réception." : "Tentative de connexion..."}
             </p>
           </div>
         </div>
