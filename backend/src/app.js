@@ -17,6 +17,7 @@ import p2pRoutes from './routes/p2p.js';
 import kycRoutes from './routes/kyc.js';
 import feesRoutes from './routes/fees.js';
 import engagementRoutes from './routes/engagement.js';
+import subscriptionRoutes from './routes/subscription.js';
 import notificationsRoutes from './routes/notifications.js';
 
 const app = express();
@@ -38,6 +39,7 @@ app.use('/api/mobile-money', mobileMoneyRoutes);
 app.use('/api/deriv', derivRoutes);
 app.use('/api/p2p', p2pRoutes);
 app.use('/api/kyc', kycRoutes);
+app.use('/api/subscription', subscriptionRoutes);
 app.use('/api/engagement', engagementRoutes);
 app.use('/api/fees', feesRoutes);
 app.use('/api/notifications', notificationsRoutes);

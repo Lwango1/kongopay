@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3,
-  ArrowUpFromLine, ArrowDownFromLine, ExternalLink, CheckCircle, Clock, Target, Zap
+  ArrowUpFromLine, ArrowDownFromLine, ExternalLink, CheckCircle, Clock, Target, Zap, Lock, Crown
 } from "lucide-react";
 import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
 import type { Candlestick, Signal } from "@/lib/deriv";
 import { initDerivClient, getDerivState, predictSpike, getCandlesticks } from "@/lib/deriv";
 import type { IndexType } from "@/lib/deriv";
+import { useAuth } from "@/context/AuthContext";
+import { apiFetch } from "@/lib/api";
 
 interface IndexData {
   price: number;
@@ -91,11 +94,22 @@ function SignalBadge({ signal, isConfirmed }: { signal: Signal; isConfirmed: boo
 }
 
 export default function PredictionGame() {
+  const { user } = useAuth();
+  const router = useRouter();
+
   const [state, setState] = useState<Record<string, IndexData> | null>(null);
   const [spike, setSpike] = useState<SpikePrediction | null>(null);
   const [activeKey, setActiveKey] = useState("BOOM_500");
   const [connected, setConnected] = useState(false);
   const [candles, setCandles] = useState<Candlestick[]>([]);
+  const [isPremium, setIsPremium] = useState(false);
+  const [signalUsage, setSignalUsage] = useState({ used: 0, limit: 3, remaining: 3 });
+
+  useEffect(() => {
+    if (!user) return;
+    apiFetch<any>("/subscription/status").then(d => setIsPremium(d.isPremium)).catch(() => {});
+    apiFetch<any>("/subscription/signal-usage").then(d => setSignalUsage(d)).catch(() => {});
+  }, [user]);
 
   const chartRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
@@ -274,71 +288,101 @@ export default function PredictionGame() {
             </div>
 
             {hasSignal && spike && (
-              <div className={`rounded-xl border p-5 transition-all ${spike.isConfirmed ? "border-success/50 bg-success/10" : spike.signal.includes("STRONG") ? "border-primary/40 bg-primary/10" : "border-border bg-surface/50"}`}>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    {spike.isConfirmed ? (
-                      <CheckCircle size={20} className="text-success" />
+              <div className={`rounded-xl border p-5 transition-all relative overflow-hidden ${spike.isConfirmed ? "border-success/50 bg-success/10" : spike.signal.includes("STRONG") ? "border-primary/40 bg-primary/10" : "border-border bg-surface/50"}`}>
+                {!isPremium && !user && (
+                  <div className="absolute inset-0 z-10 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 p-6">
+                    <Lock size={32} className="text-text-muted" />
+                    <p className="font-semibold text-text">Signal réservé aux membres</p>
+                    <p className="text-xs text-text-secondary text-center">Connecte-toi pour voir les signaux</p>
+                    <a href="/connexion" className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors">Se connecter</a>
+                  </div>
+                )}
+                {!isPremium && user && (
+                  <div className="absolute inset-0 z-10 bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 p-6">
+                    <Crown size={32} className="text-warning" />
+                    <p className="font-semibold text-text">Signal Premium</p>
+                    <p className="text-xs text-text-secondary text-center">
+                      {signalUsage.remaining > 0
+                        ? `Il te reste ${signalUsage.remaining} signal${signalUsage.remaining > 1 ? 'x' : ''} gratuit aujourd'hui`
+                        : "Abonne-toi pour voir les signaux en temps réel"}
+                    </p>
+                    {signalUsage.remaining > 0 ? (
+                      <span className="bg-primary/20 text-primary px-4 py-1.5 rounded-lg text-xs font-semibold">
+                        {signalUsage.remaining} gratuit{signalUsage.remaining > 1 ? 's' : ''} aujourd'hui
+                      </span>
                     ) : (
-                      <Clock size={20} className="text-warning" />
+                      <a href="/recompenses" className="bg-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-primary/90 transition-colors">
+                        Devenir Premium
+                      </a>
                     )}
-                    <span className="font-semibold">
-                      Signal {spike.expectedDirection === "up" ? "ACHAT" : "VENTE"}
-                      {spike.isConfirmed ? " ✓ Confirmé" : " — En attente de confirmation"}
+                  </div>
+                )}
+                <div className={`${!isPremium ? "opacity-30 blur-sm pointer-events-none" : ""}`}>
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      {spike.isConfirmed ? (
+                        <CheckCircle size={20} className="text-success" />
+                      ) : (
+                        <Clock size={20} className="text-warning" />
+                      )}
+                      <span className="font-semibold">
+                        Signal {spike.expectedDirection === "up" ? "ACHAT" : "VENTE"}
+                        {spike.isConfirmed ? " ✓ Confirmé" : " — En attente de confirmation"}
+                      </span>
+                    </div>
+                    <span className={`text-lg font-bold font-mono ${spike.spikeProbability >= 70 ? "text-success" : spike.spikeProbability >= 50 ? "text-warning" : "text-text-muted"}`}>
+                      {spike.spikeProbability}%
                     </span>
                   </div>
-                  <span className={`text-lg font-bold font-mono ${spike.spikeProbability >= 70 ? "text-success" : spike.spikeProbability >= 50 ? "text-warning" : "text-text-muted"}`}>
-                    {spike.spikeProbability}%
-                  </span>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="rounded-lg bg-background border border-border p-3">
+                      <p className="text-[10px] text-text-muted uppercase font-semibold mb-1 flex items-center gap-1">
+                        <Target size={10} /> Point d&apos;entrée
+                      </p>
+                      <p className="text-lg font-bold font-mono text-text">${spike.entryPrice.toFixed(2)}</p>
+                    </div>
+                    <div className="rounded-lg bg-background border border-border p-3">
+                      <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Stop Loss</p>
+                      <p className={`text-lg font-bold font-mono ${spike.expectedDirection === "up" ? "text-danger" : "text-success"}`}>
+                        ${spike.stopLoss.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-background border border-border p-3">
+                      <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Take Profit</p>
+                      <p className={`text-lg font-bold font-mono ${spike.expectedDirection === "up" ? "text-success" : "text-danger"}`}>
+                        ${spike.takeProfit.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-background border border-border p-3">
+                      <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Ampleur estimée</p>
+                      <p className="text-lg font-bold font-mono text-text">{spike.estimatedMagnitude}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs text-text-secondary bg-background rounded-lg px-3 py-2 border border-border">
+                    <BarChart3 size={12} className="text-primary" />
+                    <span>
+                      {spike.expectedDirection === "up"
+                        ? `Prix proche du support (${spike.referenceStrength}x touché), ${spike.consecutiveMoves} baisses consécutives, OB haussier → Signal ACHAT`
+                        : `Prix proche de la résistance (${spike.referenceStrength}x touchée), ${spike.consecutiveMoves} hausses consécutives, OB baissier → Signal VENTE`}
+                    </span>
+                  </div>
+
+                  {spike.isConfirmed && (
+                    <div className="mt-3 flex items-center gap-2 text-success animate-pulse text-sm font-semibold">
+                      <Zap size={14} />
+                      Signal confirmé à ${spike.confirmationPrice?.toFixed(2) ?? "—"} ! Position active.
+                    </div>
+                  )}
+
+                  {!spike.isConfirmed && spike.signal !== "NEUTRAL" && (
+                    <div className="mt-3 flex items-center gap-2 text-warning text-sm">
+                      <Clock size={14} />
+                      En attente de confirmation du mouvement dans la direction anticipée...
+                    </div>
+                  )}
                 </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                  <div className="rounded-lg bg-background border border-border p-3">
-                    <p className="text-[10px] text-text-muted uppercase font-semibold mb-1 flex items-center gap-1">
-                      <Target size={10} /> Point d&apos;entrée
-                    </p>
-                    <p className="text-lg font-bold font-mono text-text">${spike.entryPrice.toFixed(2)}</p>
-                  </div>
-                  <div className="rounded-lg bg-background border border-border p-3">
-                    <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Stop Loss</p>
-                    <p className={`text-lg font-bold font-mono ${spike.expectedDirection === "up" ? "text-danger" : "text-success"}`}>
-                      ${spike.stopLoss.toFixed(2)}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-background border border-border p-3">
-                    <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Take Profit</p>
-                    <p className={`text-lg font-bold font-mono ${spike.expectedDirection === "up" ? "text-success" : "text-danger"}`}>
-                      ${spike.takeProfit.toFixed(2)}
-                    </p>
-                  </div>
-                  <div className="rounded-lg bg-background border border-border p-3">
-                    <p className="text-[10px] text-text-muted uppercase font-semibold mb-1">Ampleur estimée</p>
-                    <p className="text-lg font-bold font-mono text-text">{spike.estimatedMagnitude}</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 text-xs text-text-secondary bg-background rounded-lg px-3 py-2 border border-border">
-                  <BarChart3 size={12} className="text-primary" />
-                  <span>
-                    {spike.expectedDirection === "up"
-                      ? `Prix proche du support (${spike.referenceStrength}x touché), ${spike.consecutiveMoves} baisses consécutives, OB haussier → Signal ACHAT`
-                      : `Prix proche de la résistance (${spike.referenceStrength}x touchée), ${spike.consecutiveMoves} hausses consécutives, OB baissier → Signal VENTE`}
-                  </span>
-                </div>
-
-                {spike.isConfirmed && (
-                  <div className="mt-3 flex items-center gap-2 text-success animate-pulse text-sm font-semibold">
-                    <Zap size={14} />
-                    Signal confirmé à ${spike.confirmationPrice?.toFixed(2) ?? "—"} ! Position active.
-                  </div>
-                )}
-
-                {!spike.isConfirmed && spike.signal !== "NEUTRAL" && (
-                  <div className="mt-3 flex items-center gap-2 text-warning text-sm">
-                    <Clock size={14} />
-                    En attente de confirmation du mouvement dans la direction anticipée...
-                  </div>
-                )}
               </div>
             )}
 
