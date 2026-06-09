@@ -330,11 +330,12 @@ export function getDerivState(): DerivSnapshot {
   return result;
 }
 
-const CLUSTER_TOLERANCE = 0.003; // 0.3% clustering threshold for S/R levels
+const CLUSTER_TOLERANCE = 0.002;
+const ATR_PERIOD = 14;
 
 interface SRLevel {
   price: number;
-  strength: number; // number of touches
+  strength: number;
   type: "support" | "resistance";
 }
 
@@ -346,54 +347,121 @@ interface OrderBlock {
   rangeHigh: number;
 }
 
+interface MarketStructure {
+  trend: "uptrend" | "downtrend" | "ranging";
+  lastBreakout: "bullish" | "bearish" | null;
+  liquiditySwept: boolean;
+  imbalance: number;
+}
+
+function atr(prices: number[], period: number = ATR_PERIOD): number {
+  if (prices.length < period + 1) return 0;
+  const recent = prices.slice(-period - 1);
+  let sum = 0;
+  for (let i = 1; i < recent.length; i++) {
+    sum += Math.abs(recent[i] - recent[i - 1]);
+  }
+  return sum / period;
+}
+
+function rsi(prices: number[], period: number = 8): number {
+  if (prices.length < period + 1) return 50;
+  const recent = prices.slice(-period - 1);
+  let gains = 0, losses = 0;
+  for (let i = 1; i < recent.length; i++) {
+    const diff = recent[i] - recent[i - 1];
+    if (diff > 0) gains += diff;
+    else losses -= diff;
+  }
+  if (losses === 0) return 100;
+  const rs = gains / losses;
+  return 100 - 100 / (1 + rs);
+}
+
+function findPivots(prices: number[], lookback: number = 3): { price: number; isHigh: boolean; strength: number }[] {
+  const pivots: { price: number; isHigh: boolean; strength: number }[] = [];
+  for (let i = lookback; i < prices.length - lookback; i++) {
+    const curr = prices[i];
+    const left = prices.slice(i - lookback, i);
+    const right = prices.slice(i + 1, i + lookback + 1);
+
+    const isHigh = left.every(p => curr > p) && right.every(p => curr > p);
+    const isLow = left.every(p => curr < p) && right.every(p => curr < p);
+
+    if (isHigh) {
+      const existing = pivots.find(p => p.isHigh && Math.abs(p.price - curr) / curr < CLUSTER_TOLERANCE);
+      if (existing) { existing.strength++; existing.price = (existing.price + curr) / 2; }
+      else pivots.push({ price: curr, isHigh: true, strength: 1 });
+    }
+    if (isLow) {
+      const existing = pivots.find(p => !p.isHigh && Math.abs(p.price - curr) / curr < CLUSTER_TOLERANCE);
+      if (existing) { existing.strength++; existing.price = (existing.price + curr) / 2; }
+      else pivots.push({ price: curr, isHigh: false, strength: 1 });
+    }
+  }
+  return pivots;
+}
+
+function analyzeMarketStructure(prices: number[]): MarketStructure {
+  const recent = prices.slice(-60);
+  if (recent.length < 20) return { trend: "ranging", lastBreakout: null, liquiditySwept: false, imbalance: 0 };
+
+  const pivots = findPivots(recent, 5);
+  const highs = pivots.filter(p => p.isHigh).sort((a, b) => b.price - a.price);
+  const lows = pivots.filter(p => !p.isHigh).sort((a, b) => a.price - b.price);
+
+  const higherHigh = highs.length >= 2 && highs[0].price > highs[1].price;
+  const lowerLow = lows.length >= 2 && lows[0].price < lows[1].price;
+  const lowerHigh = highs.length >= 2 && highs[0].price < highs[1].price;
+  const higherLow = lows.length >= 2 && lows[0].price > lows[1].price;
+
+  let trend: "uptrend" | "downtrend" | "ranging" = "ranging";
+  if (higherHigh && higherLow) trend = "uptrend";
+  else if (lowerHigh && lowerLow) trend = "downtrend";
+
+  const currentPrice = recent[recent.length - 1];
+  const lastHigh = highs[0]?.price ?? currentPrice;
+  const lastLow = lows[0]?.price ?? currentPrice;
+
+  const liquiditySwept = currentPrice > lastHigh * 1.001 || currentPrice < lastLow * 0.999;
+
+  const shortAvg = prices.slice(-10).reduce((a, b) => a + b, 0) / 10;
+  const longAvg = prices.slice(-40).reduce((a, b) => a + b, 0) / 40;
+  const imbalance = (shortAvg - longAvg) / longAvg;
+
+  return { trend, lastBreakout: liquiditySwept ? (currentPrice > lastHigh ? "bullish" : "bearish") : null, liquiditySwept, imbalance };
+}
+
 function findOrderBlocks(prices: number[]): OrderBlock[] {
   const blocks: OrderBlock[] = [];
-  const lookback = prices.slice(-200);
-  if (lookback.length < 20) return blocks;
+  const recent = prices.slice(-200);
+  if (recent.length < 30) return blocks;
 
-  const bodyThreshold = 0.001; // minimum body size relative to price
+  const avgMove = atr(recent) / (recent.reduce((a, b) => a + b, 0) / recent.length);
+  const bodyThreshold = Math.max(avgMove * 1.5, 0.0008);
 
-  for (let i = 5; i < lookback.length - 5; i++) {
-    const candle = lookback[i];
-    const prevCandle = lookback[i - 1];
-    const next1 = lookback[i + 1];
-    const next2 = lookback[i + 2];
-    const next3 = lookback[i + 3];
+  for (let i = 5; i < recent.length - 5; i++) {
+    const candle = recent[i];
+    const prev = recent[i - 1];
+    const next1 = recent[i + 1], next2 = recent[i + 2], next3 = recent[i + 3];
 
-    const change = candle - prevCandle;
+    const change = candle - prev;
     const bodySize = Math.abs(change) / candle;
-
     if (bodySize < bodyThreshold) continue;
 
-    // Bullish order block: strong bearish candle followed by at least 2 up moves
-    if (change < 0 && next1 > candle && next2 > next1) {
-      const rangeLow = Math.min(candle, prevCandle);
-      const rangeHigh = Math.max(candle, prevCandle);
-      // Avoid duplicates
-      const existing = blocks.find(b =>
-        b.type === "bullish" && Math.abs(b.price - rangeLow) / (rangeLow || 1) < CLUSTER_TOLERANCE
-      );
-      if (existing) {
-        existing.strength++;
-        existing.price = (existing.price * (existing.strength - 1) + rangeLow) / existing.strength;
-      } else {
-        blocks.push({ price: rangeLow, type: "bullish", strength: 1, rangeLow, rangeHigh });
-      }
+    const low = Math.min(candle, prev);
+    const high = Math.max(candle, prev);
+
+    if (change < 0 && next1 > candle && next2 > candle && next3 > candle) {
+      const existing = blocks.find(b => b.type === "bullish" && Math.abs(b.price - low) / (low || 1) < CLUSTER_TOLERANCE);
+      if (existing) { existing.strength++; existing.price = (existing.price * (existing.strength - 1) + low) / existing.strength; }
+      else blocks.push({ price: low, type: "bullish", strength: 1, rangeLow: low, rangeHigh: high });
     }
 
-    // Bearish order block: strong bullish candle followed by at least 2 down moves
-    if (change > 0 && next1 < candle && next2 < next1) {
-      const rangeLow = Math.min(candle, prevCandle);
-      const rangeHigh = Math.max(candle, prevCandle);
-      const existing = blocks.find(b =>
-        b.type === "bearish" && Math.abs(b.price - rangeHigh) / (rangeHigh || 1) < CLUSTER_TOLERANCE
-      );
-      if (existing) {
-        existing.strength++;
-        existing.price = (existing.price * (existing.strength - 1) + rangeHigh) / existing.strength;
-      } else {
-        blocks.push({ price: rangeHigh, type: "bearish", strength: 1, rangeLow, rangeHigh });
-      }
+    if (change > 0 && next1 < candle && next2 < candle && next3 < candle) {
+      const existing = blocks.find(b => b.type === "bearish" && Math.abs(b.price - high) / (high || 1) < CLUSTER_TOLERANCE);
+      if (existing) { existing.strength++; existing.price = (existing.price * (existing.strength - 1) + high) / existing.strength; }
+      else blocks.push({ price: high, type: "bearish", strength: 1, rangeLow: low, rangeHigh: high });
     }
   }
 
@@ -405,215 +473,173 @@ function findSupportResistance(prices: number[], currentPrice: number): {
   nearestResistance: SRLevel | null;
   allLevels: SRLevel[];
 } {
-  const lookback = prices.slice(-120);
+  const pivots3 = findPivots(prices.slice(-80), 3);
+  const pivots5 = findPivots(prices.slice(-120), 5);
+  const pivots8 = findPivots(prices.slice(-200), 8);
 
-  // Step 1: Find all pivot highs and pivot lows
-  const pivots: { price: number; isHigh: boolean }[] = [];
-  for (let i = 2; i < lookback.length - 2; i++) {
-    const curr = lookback[i];
-    const prev1 = lookback[i - 1];
-    const prev2 = lookback[i - 2];
-    const next1 = lookback[i + 1];
-    const next2 = lookback[i + 2];
+  const allPivots = [...pivots3, ...pivots5, ...pivots8];
+  const clusters: { price: number; strength: number; isHigh: boolean }[] = [];
 
-    const isPivotHigh = curr > prev1 && curr > prev2 && curr > next1 && curr > next2;
-    const isPivotLow = curr < prev1 && curr < prev2 && curr < next1 && curr < next2;
-
-    if (isPivotHigh) pivots.push({ price: curr, isHigh: true });
-    if (isPivotLow) pivots.push({ price: curr, isHigh: false });
-  }
-
-  if (pivots.length === 0) return { nearestSupport: null, nearestResistance: null, allLevels: [] };
-
-  // Step 2: Cluster nearby pivots into zones
-  const clusters: { avgPrice: number; touches: number; isHigh: boolean }[] = [];
-
-  for (const pivot of pivots) {
-    const existing = clusters.find(
-      c => Math.abs(c.avgPrice - pivot.price) / pivot.price < CLUSTER_TOLERANCE && c.isHigh === pivot.isHigh
-    );
+  for (const p of allPivots) {
+    const existing = clusters.find(c => Math.abs(c.price - p.price) / p.price < CLUSTER_TOLERANCE * 1.5 && c.isHigh === p.isHigh);
     if (existing) {
-      existing.avgPrice = (existing.avgPrice * existing.touches + pivot.price) / (existing.touches + 1);
-      existing.touches++;
+      existing.price = (existing.price * existing.strength + p.price * p.strength) / (existing.strength + p.strength);
+      existing.strength += p.strength;
     } else {
-      clusters.push({ avgPrice: pivot.price, touches: 1, isHigh: pivot.isHigh });
+      clusters.push({ price: p.price, strength: p.strength, isHigh: p.isHigh });
     }
   }
 
-  // Step 3: Classify each cluster as support or resistance relative to current price
   const supports: SRLevel[] = clusters
-    .filter(c => c.avgPrice < currentPrice)
-    .map(c => ({ price: c.avgPrice, strength: c.touches, type: "support" as const }));
+    .filter(c => c.price < currentPrice)
+    .map(c => ({ price: c.price, strength: c.strength, type: "support" as const }))
+    .sort((a, b) => b.price - a.price);
 
   const resistances: SRLevel[] = clusters
-    .filter(c => c.avgPrice > currentPrice)
-    .map(c => ({ price: c.avgPrice, strength: c.touches, type: "resistance" as const }));
+    .filter(c => c.price > currentPrice)
+    .map(c => ({ price: c.price, strength: c.strength, type: "resistance" as const }))
+    .sort((a, b) => a.price - b.price);
 
-  // Sort: nearest first
-  supports.sort((a, b) => b.price - a.price);
-  resistances.sort((a, b) => a.price - b.price);
-
-  // Step 4: Find the strongest of the nearest levels (weight proximity vs strength)
   const scoreLevel = (level: SRLevel): number => {
     const distPct = Math.abs(level.price - currentPrice) / currentPrice;
-    const distScore = Math.max(0, 1 - distPct / 0.02); // 2% max distance
-    return distScore * 0.4 + (level.strength / 10) * 0.6;
+    const distScore = Math.max(0, 1 - distPct / 0.03);
+    return distScore * 0.3 + Math.min(level.strength / 8, 1) * 0.7;
   };
 
-  supports.sort((a, b) => scoreLevel(b) - scoreLevel(a));
-  resistances.sort((a, b) => scoreLevel(b) - scoreLevel(a));
+  const getStrongest = (levels: SRLevel[]): SRLevel | null => {
+    if (levels.length === 0) return null;
+    return levels.reduce((best, l) => scoreLevel(l) > scoreLevel(best) ? l : best);
+  };
 
   const allLevels = [...supports, ...resistances].sort((a, b) => b.strength - a.strength);
 
   return {
-    nearestSupport: supports.length > 0 ? supports[0] : null,
-    nearestResistance: resistances.length > 0 ? resistances[0] : null,
+    nearestSupport: getStrongest(supports),
+    nearestResistance: getStrongest(resistances),
     allLevels,
   };
 }
 
-function scoreDirection(
+function scoreSignal(
   currentPrice: number, level: number | null, strength: number,
-  history: number[], isUp: boolean
+  history: number[], isUp: boolean, rsiVal: number, market: MarketStructure
 ): { score: number; referenceLevel: number; referenceStrength: number; distancePct: number; consecutive: number } {
-  const refLevel = level ?? (isUp
-    ? Math.min(...history.slice(-20))
-    : Math.max(...history.slice(-20))
-  );
+  const refLevel = level ?? (isUp ? Math.min(...history.slice(-20)) : Math.max(...history.slice(-20)));
   const refStrength = level ? strength : 1;
 
   const distance = Math.abs(currentPrice - refLevel);
-  const maxDist = refLevel * 0.015;
+  const avgPrice = (currentPrice + refLevel) / 2;
+  const maxDist = avgPrice * (isUp ? 0.02 : 0.02);
   const proximity = Math.max(0, 1 - distance / maxDist);
-  const extreme = Math.min(proximity, 1);
-
-  const broke = isUp ? currentPrice < refLevel : currentPrice > refLevel;
-  const effectiveExtreme = broke ? extreme * 0.2 : extreme;
+  const nearLevel = proximity > 0.3 ? 1 : 0;
 
   const recentMoves = history.slice(-15).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
-  const consecutive = recentMoves.slice(-5).filter(m => isUp ? m < 0 : m > 0).length;
-  const momentum = Math.min(consecutive / 5, 1);
+  const consecFiltered = recentMoves.slice(-5).filter(m => isUp ? m < 0 : m > 0);
+  const consecutive = consecFiltered.length;
+  const momentumScore = Math.min(consecutive / 5, 1);
 
-  const strengthBonus = Math.min(refStrength / 5, 1) * 0.15;
+  const exhaustionScore = consecutive >= 4 ? 0.3 : 0;
 
-  const score = effectiveExtreme * 0.55 + momentum * 0.2 + strengthBonus;
-  return { score, referenceLevel: refLevel, referenceStrength: refStrength, distancePct: distance / (refLevel || currentPrice) * 100, consecutive };
-}
+  let rsiScore = 0;
+  if (isUp && rsiVal < 35) rsiScore = 0.3;
+  else if (!isUp && rsiVal > 65) rsiScore = 0.3;
+  else if (isUp && rsiVal < 45) rsiScore = 0.15;
+  else if (!isUp && rsiVal > 55) rsiScore = 0.15;
 
-function scoreOB(
-  currentPrice: number, blocks: OrderBlock[], isUp: boolean
-): { score: number; level: number; strength: number } {
-  const relevant = blocks.filter(b => b.type === (isUp ? "bullish" : "bearish"));
-  if (relevant.length === 0) return { score: 0, level: currentPrice, strength: 0 };
+  let marketScore = 0;
+  if (isUp && market.trend === "uptrend") marketScore = 0.2;
+  else if (!isUp && market.trend === "downtrend") marketScore = 0.2;
+  else if (market.trend === "ranging") marketScore = 0.1;
 
-  let bestScore = 0;
-  let bestLevel = currentPrice;
-  let bestStrength = 0;
+  if (isUp && market.liquiditySwept && market.lastBreakout === "bullish") marketScore += 0.15;
+  else if (!isUp && market.liquiditySwept && market.lastBreakout === "bearish") marketScore += 0.15;
 
-  for (const ob of relevant) {
-    const distance = Math.abs(currentPrice - ob.price);
-    const maxDist = ob.price * 0.02;
-    const proximity = Math.max(0, 1 - distance / maxDist);
-    const strengthFactor = Math.min(ob.strength / 3, 1);
-    const obScore = proximity * 0.6 + strengthFactor * 0.4;
+  const strengthBonus = Math.min(refStrength / 5, 1) * 0.1;
 
-    if (obScore > bestScore) {
-      bestScore = obScore;
-      bestLevel = ob.price;
-      bestStrength = ob.strength;
-    }
-  }
-
-  return { score: bestScore, level: bestLevel, strength: bestStrength };
+  const score = nearLevel * 0.15 + momentumScore * 0.15 + rsiScore + marketScore + strengthBonus + exhaustionScore;
+  return { score: Math.min(score, 1), referenceLevel: refLevel, referenceStrength: refStrength, distancePct: distance / (refLevel || currentPrice) * 100, consecutive };
 }
 
 export function predictSpike(type: IndexType, num: number) {
   const key = getKey(type, num);
   const st = stateMap.get(key);
-  if (!st || st.history.length < 20) {
+  if (!st || st.history.length < 30) {
     return { error: "Pas assez de données historiques" };
   }
 
   const history = st.history;
   const currentPrice = st.price;
+  const vol = atr(history);
+  const rsiVal = rsi(history);
+  const market = analyzeMarketStructure(history);
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
   const orderBlocks = findOrderBlocks(history);
 
-  const ns = nearestSupport;
-  const nr = nearestResistance;
+  const upScore = scoreSignal(currentPrice, nearestSupport?.price ?? null, nearestSupport?.strength ?? 0, history, true, rsiVal, market);
+  const downScore = scoreSignal(currentPrice, nearestResistance?.price ?? null, nearestResistance?.strength ?? 0, history, false, rsiVal, market);
 
-  const upSR = scoreDirection(currentPrice, ns?.price ?? null, ns?.strength ?? 0, history, true);
-  const downSR = scoreDirection(currentPrice, nr?.price ?? null, nr?.strength ?? 0, history, false);
-  const upOB = scoreOB(currentPrice, orderBlocks, true);
-  const downOB = scoreOB(currentPrice, orderBlocks, false);
-
-  const upTotal = upSR.score * 0.85 + upOB.score * 0.15;
-  const downTotal = downSR.score * 0.85 + downOB.score * 0.15;
-
-  const isUp = upTotal >= downTotal;
-  const bestScore = isUp ? upTotal : downTotal;
-  const bestRef = isUp
-    ? (upOB.score > upSR.score * 0.3 ? { level: upOB.level, strength: upOB.strength } : { level: upSR.referenceLevel, strength: upSR.referenceStrength })
-    : (downOB.score > downSR.score * 0.3 ? { level: downOB.level, strength: downOB.strength } : { level: downSR.referenceLevel, strength: downSR.referenceStrength });
+  const isUp = upScore.score >= downScore.score;
+  const bestScore = isUp ? upScore.score : downScore.score;
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
-  const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
-  const probability = Math.min((bestScore + timeFactor * 0.1) * 100, 95);
+  const recoveryTime = Math.min(msSinceLastSpike / 60000, 1);
+  const probability = Math.min((bestScore * 0.85 + recoveryTime * 0.15) * 100, 97);
 
-  const volatilityFactor = 1000 / num;
-  const magnitudePct = (0.015 + bestScore * 0.05) * volatilityFactor;
+  const volFactor = num === 1000 ? 0.6 : num === 900 ? 0.8 : 1;
+  const magnitudePct = (0.008 + bestScore * 0.04) * volFactor;
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
-  const pricePos = ns && nr
-    ? Math.round(((currentPrice - ns.price) / (nr.price - ns.price)) * 100)
+  const pricePos = nearestSupport && nearestResistance
+    ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
     : 50;
 
   const expDir = isUp ? "up" : "down";
-  const bestConsecutive = isUp ? upSR.consecutive : downSR.consecutive;
+  const bestConsecutive = isUp ? upScore.consecutive : downScore.consecutive;
 
-  // --- Signal generation ---
   let signal: Signal = "NEUTRAL";
-  if (probability >= 80) signal = isUp ? "STRONG_BUY" : "STRONG_SELL";
-  else if (probability >= 60) signal = isUp ? "BUY" : "SELL";
+  if (probability >= 82) signal = isUp ? "STRONG_BUY" : "STRONG_SELL";
+  else if (probability >= 62) signal = isUp ? "BUY" : "SELL";
 
   const entryLevel = isUp
-    ? (ns?.price ?? currentPrice * 0.98)
-    : (nr?.price ?? currentPrice * 1.02);
+    ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
+    : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
 
-  const stopDist = currentPrice * magnitudePct * 0.5;
-  const takeDist = currentPrice * magnitudePct * 1.5;
+  const slBuffer = vol * 0.6;
+  const tpBuffer = vol * 1.8;
 
   const stopLoss = isUp
-    ? Math.min(entryLevel * 0.995, entryLevel - stopDist)
-    : Math.max(entryLevel * 1.005, entryLevel + stopDist);
+    ? Math.min(entryLevel * 0.996, entryLevel - slBuffer)
+    : Math.max(entryLevel * 1.004, entryLevel + slBuffer);
 
   const takeProfit = isUp
-    ? entryLevel + takeDist
-    : entryLevel - takeDist;
+    ? Math.max(entryLevel + tpBuffer, currentPrice + vol * 0.8)
+    : Math.min(entryLevel - tpBuffer, currentPrice - vol * 0.8);
 
-  // --- Confirmation logic ---
   let isConfirmed = false;
   let confirmationPrice: number | null = null;
 
   if (signal !== "NEUTRAL") {
     const prevSig = st.prevSignal;
-    const sigChanged = prevSig !== (isUp ? "BUY" : "SELL") && prevSig !== (isUp ? "STRONG_BUY" : "STRONG_SELL");
+    const isBuy = isUp;
+    const currentSig = isBuy ? (signal === "STRONG_BUY" ? "STRONG_BUY" : "BUY") : (signal === "STRONG_SELL" ? "STRONG_SELL" : "SELL");
+    const sigChanged = prevSig !== currentSig;
 
     if (sigChanged) {
-      st.prevSignal = isUp ? (signal === "STRONG_BUY" ? "STRONG_BUY" : "BUY") : (signal === "STRONG_SELL" ? "STRONG_SELL" : "SELL");
+      st.prevSignal = currentSig;
       st.prevSignalPrice = currentPrice;
       st.prevSignalTime = Date.now();
       st.confirmationTriggered = false;
     }
 
-    const priceSinceSignal = (currentPrice - st.prevSignalPrice) / st.prevSignalPrice;
+    const priceChange = (currentPrice - st.prevSignalPrice) / st.prevSignalPrice;
+    const confirmThreshold = Math.max(vol / currentPrice * 0.5, 0.0008);
 
     if (!st.confirmationTriggered) {
-      if (isUp && priceSinceSignal >= 0.001) {
+      if (isBuy && priceChange >= confirmThreshold) {
         isConfirmed = true;
         confirmationPrice = currentPrice;
         st.confirmationTriggered = true;
-      } else if (!isUp && priceSinceSignal <= -0.001) {
+      } else if (!isBuy && priceChange <= -confirmThreshold) {
         isConfirmed = true;
         confirmationPrice = currentPrice;
         st.confirmationTriggered = true;
@@ -624,37 +650,30 @@ export function predictSpike(type: IndexType, num: number) {
     }
   }
 
+  const bestRef = isUp
+    ? (orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01 ? { level: orderBlocks[0].price, strength: orderBlocks[0].strength } : { level: upScore.referenceLevel, strength: upScore.referenceStrength })
+    : (orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01 ? { level: orderBlocks[0].price, strength: orderBlocks[0].strength } : { level: downScore.referenceLevel, strength: downScore.referenceStrength });
+
   return {
-    type,
-    number: num,
-    currentPrice,
-    spikeProbability: Math.round(probability),
+    type, number: num, currentPrice,
+    spikeProbability: Math.round(Math.min(probability, 97)),
     expectedDirection: expDir,
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: probability > 70,
+    isSpikeImminent: probability > 72,
     pricePosition: pricePos,
     consecutiveMoves: bestConsecutive,
-    rangeLow: ns?.price ?? currentPrice * 0.98,
-    rangeHigh: nr?.price ?? currentPrice * 1.02,
-    referenceLevel: bestRef.level,
+    rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
+    rangeHigh: nearestResistance?.price ?? currentPrice * 1.02,
+    referenceLevel: Math.round(bestRef.level * 100) / 100,
     referenceStrength: bestRef.strength,
     distancePercent: Math.round(Math.abs(currentPrice - bestRef.level) / (bestRef.level || currentPrice) * 10000) / 100,
-    sRlevels: allLevels.slice(0, 6).map(l => ({
-      price: Math.round(l.price * 100) / 100,
-      strength: l.strength,
-      type: l.type,
-    })),
-    orderBlocks: orderBlocks.slice(0, 4).map(ob => ({
-      price: Math.round(ob.price * 100) / 100,
-      type: ob.type,
-      strength: ob.strength,
-    })),
-    upScore: Math.round(upTotal * 100),
-    downScore: Math.round(downTotal * 100),
+    sRlevels: allLevels.slice(0, 6).map(l => ({ price: Math.round(l.price * 100) / 100, strength: l.strength, type: l.type })),
+    orderBlocks: orderBlocks.slice(0, 4).map(ob => ({ price: Math.round(ob.price * 100) / 100, type: ob.type, strength: ob.strength })),
+    upScore: Math.round(upScore.score * 100),
+    downScore: Math.round(downScore.score * 100),
     connected: st.connected,
     timestamp: Date.now(),
-    // New trade signal fields
     signal,
     entryPrice: Math.round(entryLevel * 100) / 100,
     stopLoss: Math.round(stopLoss * 100) / 100,
