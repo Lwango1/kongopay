@@ -69,7 +69,7 @@ async function startBackgroundTasks() {
 
       for (const idx of [{ type: 'BOOM', number: 500 }, { type: 'BOOM', number: 1000 },
         { type: 'CRASH', number: 500 }, { type: 'CRASH', number: 1000 }]) {
-        const signal = derivService.generateSignal(idx.type, idx.number);
+        const signal = await derivService.generateSignal(idx.type, idx.number);
         if (signal && signal.spikeProbability > 75) {
           await derivService.emitSignal(idx.type, idx.number);
         }

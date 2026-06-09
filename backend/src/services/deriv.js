@@ -432,7 +432,7 @@ class DerivLiveService {
     return (slice[slice.length - 1] - slice[0]) / slice[0];
   }
 
-  generateSignal(type, num) {
+  async generateSignal(type, num) {
     const prediction = this.predictSpike(type, num);
     if (prediction.error || !prediction.isSpikeImminent) return null;
 
@@ -442,13 +442,68 @@ class DerivLiveService {
     const atr = this.calculateATR(history);
     const atrRatio = atr / (prediction.currentPrice || 1);
 
+    const features = {
+      rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
+      atr_ratio: atrRatio,
+      volume: st.history.length > 100 ? (st.history.slice(-100).reduce((a, b) => a + b, 0) / st.history.slice(-100).length) / (prediction.currentPrice || 1) : 0.5,
+      price_position: prediction.pricePosition / 100,
+      consecutive_moves: prediction.consecutiveMoves / 10,
+      time_since_spike: Math.min((prediction.timeSinceLastSpike || 999) / 100, 1),
+      momentum: this.calculateMomentum(history),
+      sr_distance: prediction.distancePercent / 100,
+      mfi: this.calculateMFI(history) / 100,
+      macd_histogram: 0.5,
+    };
+
+    // ML integration: blend heuristic + ML prediction
+    let mlBoost = 0;
+    let mlDirection = prediction.expectedDirection;
+    let probability = prediction.spikeProbability;
+
+    try {
+      const { mlService } = await import('./mlPrediction.js');
+      if (mlService.ready) {
+        const featArray = [
+          features.rsi, features.atr_ratio, features.volume,
+          features.price_position, features.consecutive_moves,
+          features.time_since_spike, features.momentum,
+          features.sr_distance, features.mfi, features.macd_histogram,
+        ];
+        const mlResult = mlService.predict(featArray);
+        const mlTotal = mlResult.up + mlResult.down + mlResult.neutral;
+        const mlUpConfidence = mlResult.up / mlTotal;
+        const mlDownConfidence = mlResult.down / mlTotal;
+
+        // ML strongly disagrees with heuristic
+        if (mlResult.source === 'ml') {
+          const mlAgrees = (prediction.expectedDirection === 'up' && mlUpConfidence > mlDownConfidence)
+            || (prediction.expectedDirection === 'down' && mlDownConfidence > mlUpConfidence);
+
+          if (mlAgrees) {
+            mlBoost = Math.max(mlUpConfidence, mlDownConfidence) * 20;
+          } else {
+            mlBoost = -Math.max(mlUpConfidence, mlDownConfidence) * 15;
+          }
+
+          // ML can flip direction if very confident (>80%)
+          const topMl = mlUpConfidence > mlDownConfidence ? 'up' : 'down';
+          if (topMl !== prediction.expectedDirection && Math.max(mlUpConfidence, mlDownConfidence) > 0.8) {
+            mlDirection = topMl;
+            mlBoost = Math.max(mlUpConfidence, mlDownConfidence) * 10;
+          }
+        }
+      }
+    } catch { /* ML not available, fallback to heuristic */ }
+
+    probability = Math.min(Math.max(probability + mlBoost, 0), 99);
+
     const dynamicSLMultiplier = type === 'BOOM' ? 1.5 : 1.5;
     const dynamicTPMultiplier = type === 'BOOM' ? 2.5 : 2.5;
     const slDistance = Math.max(atr * dynamicSLMultiplier, prediction.currentPrice * 0.005);
     const tpDistance = atr * dynamicTPMultiplier;
 
-    const upScore = prediction.expectedDirection === 'up' ? prediction.spikeProbability : 100 - prediction.spikeProbability;
-    const downScore = prediction.expectedDirection === 'down' ? prediction.spikeProbability : 100 - prediction.spikeProbability;
+    let upScore = mlDirection === 'up' ? probability : 100 - probability;
+    let downScore = mlDirection === 'down' ? probability : 100 - probability;
     const signal = upScore > downScore ? 'STRONG_BUY' : 'STRONG_SELL';
 
     const entryPrice = prediction.currentPrice;
@@ -457,30 +512,22 @@ class DerivLiveService {
 
     return {
       ...prediction,
+      spikeProbability: Math.round(probability),
+      expectedDirection: mlDirection,
       signal,
       entryPrice: Math.round(entryPrice * 100) / 100,
       stopLoss: Math.round(stopLoss * 100) / 100,
       takeProfit: Math.round(takeProfit * 100) / 100,
-      upScore,
-      downScore,
-      rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
-      features: {
-        rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
-        atr_ratio: atrRatio,
-        volume: st.history.length > 100 ? (st.history.slice(-100).reduce((a, b) => a + b, 0) / st.history.slice(-100).length) / (prediction.currentPrice || 1) : 0.5,
-        price_position: prediction.pricePosition / 100,
-        consecutive_moves: prediction.consecutiveMoves / 10,
-        time_since_spike: Math.min((prediction.timeSinceLastSpike || 999) / 100, 1),
-        momentum: this.calculateMomentum(history),
-        sr_distance: prediction.distancePercent / 100,
-        mfi: this.calculateMFI(history) / 100,
-        macd_histogram: 0.5,
-      },
+      upScore: Math.round(upScore),
+      downScore: Math.round(downScore),
+      mlBoost: Math.round(mlBoost),
+      rsi: features.rsi,
+      features,
     };
   }
 
   async emitSignal(type, num) {
-    const signal = this.generateSignal(type, num);
+    const signal = await this.generateSignal(type, num);
     if (!signal) return null;
 
     const { signalTracker } = await import('./signalTracker.js');
