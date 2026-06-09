@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { label: "Accueil", href: "/" },
   { label: "Marchés", href: "/marches" },
   { label: "Synthétiques", href: "/marches#deriv" },
+  { label: "Récompenses", href: "/recompenses" },
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
   { label: "Apprendre", href: "/apprendre" },
