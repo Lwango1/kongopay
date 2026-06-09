@@ -11,6 +11,24 @@ export interface IndexState {
   lastSpikeTime: number;
   lastSpikeDirection: "up" | "down" | null;
   connected: boolean;
+  prevSignal: Signal | null;
+  prevSignalPrice: number;
+  prevSignalTime: number;
+  confirmationTriggered: boolean;
+}
+
+export type Signal = "STRONG_BUY" | "BUY" | "NEUTRAL" | "SELL" | "STRONG_SELL";
+
+export interface TradeSignal {
+  signal: Signal;
+  direction: "up" | "down";
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  confidence: number;
+  reason: string;
+  isConfirmed: boolean;
+  confirmationPrice: number | null;
 }
 
 export interface Candlestick {
@@ -55,6 +73,10 @@ for (const idx of INDICES) {
     lastSpikeTime: Date.now(),
     lastSpikeDirection: null,
     connected: false,
+    prevSignal: null,
+    prevSignalPrice: 0,
+    prevSignalTime: 0,
+    confirmationTriggered: false,
   });
   candleMap.set(getKey(idx.type, idx.number), []);
 }
@@ -525,7 +547,6 @@ export function predictSpike(type: IndexType, num: number) {
   const upOB = scoreOB(currentPrice, orderBlocks, true);
   const downOB = scoreOB(currentPrice, orderBlocks, false);
 
-  // Combine S/R and OB scores (85% S/R, 15% OB)
   const upTotal = upSR.score * 0.85 + upOB.score * 0.15;
   const downTotal = downSR.score * 0.85 + downOB.score * 0.15;
 
@@ -540,7 +561,8 @@ export function predictSpike(type: IndexType, num: number) {
   const probability = Math.min((bestScore + timeFactor * 0.1) * 100, 95);
 
   const volatilityFactor = 1000 / num;
-  const magnitude = ((0.015 + bestScore * 0.05) * volatilityFactor * 100).toFixed(1);
+  const magnitudePct = (0.015 + bestScore * 0.05) * volatilityFactor;
+  const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
   const pricePos = ns && nr
     ? Math.round(((currentPrice - ns.price) / (nr.price - ns.price)) * 100)
@@ -549,13 +571,66 @@ export function predictSpike(type: IndexType, num: number) {
   const expDir = isUp ? "up" : "down";
   const bestConsecutive = isUp ? upSR.consecutive : downSR.consecutive;
 
+  // --- Signal generation ---
+  let signal: Signal = "NEUTRAL";
+  if (probability >= 80) signal = isUp ? "STRONG_BUY" : "STRONG_SELL";
+  else if (probability >= 60) signal = isUp ? "BUY" : "SELL";
+
+  const entryLevel = isUp
+    ? (ns?.price ?? currentPrice * 0.98)
+    : (nr?.price ?? currentPrice * 1.02);
+
+  const stopDist = currentPrice * magnitudePct * 0.5;
+  const takeDist = currentPrice * magnitudePct * 1.5;
+
+  const stopLoss = isUp
+    ? Math.min(entryLevel * 0.995, entryLevel - stopDist)
+    : Math.max(entryLevel * 1.005, entryLevel + stopDist);
+
+  const takeProfit = isUp
+    ? entryLevel + takeDist
+    : entryLevel - takeDist;
+
+  // --- Confirmation logic ---
+  let isConfirmed = false;
+  let confirmationPrice: number | null = null;
+
+  if (signal !== "NEUTRAL") {
+    const prevSig = st.prevSignal;
+    const sigChanged = prevSig !== (isUp ? "BUY" : "SELL") && prevSig !== (isUp ? "STRONG_BUY" : "STRONG_SELL");
+
+    if (sigChanged) {
+      st.prevSignal = isUp ? (signal === "STRONG_BUY" ? "STRONG_BUY" : "BUY") : (signal === "STRONG_SELL" ? "STRONG_SELL" : "SELL");
+      st.prevSignalPrice = currentPrice;
+      st.prevSignalTime = Date.now();
+      st.confirmationTriggered = false;
+    }
+
+    const priceSinceSignal = (currentPrice - st.prevSignalPrice) / st.prevSignalPrice;
+
+    if (!st.confirmationTriggered) {
+      if (isUp && priceSinceSignal >= 0.001) {
+        isConfirmed = true;
+        confirmationPrice = currentPrice;
+        st.confirmationTriggered = true;
+      } else if (!isUp && priceSinceSignal <= -0.001) {
+        isConfirmed = true;
+        confirmationPrice = currentPrice;
+        st.confirmationTriggered = true;
+      }
+    } else {
+      isConfirmed = true;
+      confirmationPrice = st.prevSignalPrice;
+    }
+  }
+
   return {
     type,
     number: num,
     currentPrice,
     spikeProbability: Math.round(probability),
     expectedDirection: expDir,
-    estimatedMagnitude: `${magnitude}%`,
+    estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
     isSpikeImminent: probability > 70,
     pricePosition: pricePos,
@@ -579,6 +654,13 @@ export function predictSpike(type: IndexType, num: number) {
     downScore: Math.round(downTotal * 100),
     connected: st.connected,
     timestamp: Date.now(),
+    // New trade signal fields
+    signal,
+    entryPrice: Math.round(entryLevel * 100) / 100,
+    stopLoss: Math.round(stopLoss * 100) / 100,
+    takeProfit: Math.round(takeProfit * 100) / 100,
+    isConfirmed,
+    confirmationPrice: confirmationPrice ? Math.round(confirmationPrice * 100) / 100 : null,
   };
 }
 
