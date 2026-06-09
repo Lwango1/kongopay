@@ -22,7 +22,6 @@ import engagementRoutes from './routes/engagement.js';
 import subscriptionRoutes from './routes/subscription.js';
 import notificationsRoutes from './routes/notifications.js';
 import signalsRoutes from './routes/signals.js';
-import telegramRoutes from './routes/telegram.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,7 +47,6 @@ app.use('/api/engagement', engagementRoutes);
 app.use('/api/fees', feesRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/signals', signalsRoutes);
-app.use('/api/telegram', telegramRoutes);
 
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', version: '2.0.0', name: 'KongoPay API' });

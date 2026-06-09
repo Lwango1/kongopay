@@ -485,10 +485,6 @@ class DerivLiveService {
 
     const { signalTracker } = await import('./signalTracker.js');
     const saved = await signalTracker.recordSignal(signal);
-    if (saved) {
-      const { telegramService } = await import('./telegram.js');
-      await telegramService.broadcastSignal(saved);
-    }
     return saved;
   }
 

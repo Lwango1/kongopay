@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { signalTracker } from '../services/signalTracker.js';
-import { telegramService } from '../services/telegram.js';
 
 const router = Router();
 
@@ -29,16 +28,6 @@ router.get('/by-label/:label', async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const signals = await signalTracker.getSignalsByLabel(req.params.label, limit);
     res.json(signals);
-  } catch (err) {
-    next(err);
-  }
-});
-
-router.post('/broadcast', authenticate, requireAdmin, async (req, res, next) => {
-  try {
-    const stats = await signalTracker.getStats();
-    await telegramService.broadcastStats(stats);
-    res.json({ sent: true });
   } catch (err) {
     next(err);
   }
