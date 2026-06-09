@@ -2,9 +2,7 @@ import Header from "@/components/Header";
 import Hero from "@/components/Hero";
 import Features from "@/components/Features";
 import MarketOverview from "@/components/MarketOverview";
-import TradingMockup from "@/components/TradingMockup";
 import PredictionGame from "@/components/PredictionGame";
-import MarketScanner from "@/components/MarketScanner";
 import Converter from "@/components/Converter";
 import PriceAlert from "@/components/PriceAlert";
 import AdBanner from "@/components/AdBanner";
@@ -18,10 +16,8 @@ export default function Home() {
         <Hero />
         <Features />
         <AdBanner slot="1234567890" className="py-8 max-w-4xl mx-auto" />
-        <MarketScanner />
         <MarketOverview />
         <AdBanner slot="1234567891" format="horizontal" className="py-8 mx-auto flex justify-center" />
-        <TradingMockup />
         <PredictionGame />
         <Converter />
         <PriceAlert />

@@ -104,6 +104,7 @@ export default function PredictionGame() {
   const [candles, setCandles] = useState<Candlestick[]>([]);
   const [isPremium, setIsPremium] = useState(false);
   const [signalUsage, setSignalUsage] = useState({ used: 0, limit: 3, remaining: 3 });
+  const [overviewData, setOverviewData] = useState<Record<string, any>>({});
 
   useEffect(() => {
     if (!user) return;
@@ -135,6 +136,16 @@ export default function PredictionGame() {
         }
         const candlestickData = getCandlesticks(type, num);
         setCandles([...candlestickData]);
+
+        const ov: Record<string, any> = {};
+        for (const idx of INDICES) {
+          const k = `${idx.type}_${idx.number}`;
+          const p = predictSpike(idx.type, idx.number);
+          if (p && !("error" in p)) {
+            ov[k] = { probability: p.spikeProbability, direction: p.expectedDirection, imminent: p.isSpikeImminent };
+          }
+        }
+        setOverviewData(ov);
       }
     } catch { /* ignore */ }
   }, [activeKey]);
@@ -226,6 +237,28 @@ export default function PredictionGame() {
             L&apos;algorithme analyse les niveaux S/R et ordres blocs pour générer des signaux BUY/SELL avec entrée, stop loss et take profit.
           </p>
         </div>
+
+        {Object.keys(overviewData).length > 0 && (
+          <div className="mb-6 grid grid-cols-3 sm:grid-cols-6 gap-2">
+            {INDICES.map((idx) => {
+              const k = `${idx.type}_${idx.number}`;
+              const d = overviewData[k];
+              if (!d) return null;
+              const prob = d.probability ?? 0;
+              const probColor = d.imminent ? "#ef4444" : prob > 60 ? "#22c55e" : "#a0aec0";
+              const isActive = k === activeKey;
+              const dir = d.direction === "up" ? "↑" : "↓";
+              return (
+                <button key={k} onClick={() => setActiveKey(k)}
+                  className={`flex flex-col items-center gap-0.5 p-2 rounded-lg text-xs font-medium transition-all ${isActive ? "bg-primary/15 border border-primary/40" : "bg-background border border-border hover:bg-surface"}`}>
+                  <span className="text-[10px] text-text-muted uppercase">{idx.label}</span>
+                  <span className="text-sm font-bold" style={{ color: probColor }}>{prob}%</span>
+                  <span className={`text-[11px] ${d.direction === "up" ? "text-success" : "text-danger"}`}>{dir}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="grid lg:grid-cols-4 gap-6">
           <div className="lg:col-span-1 space-y-2">
