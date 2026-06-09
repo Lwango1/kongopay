@@ -2,15 +2,15 @@
 
 import { useEffect, useState, useRef } from "react";
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Area, AreaChart,
 } from "recharts";
 import {
   TrendingUp, AlertTriangle, Flame, Droplet,
   Maximize2, Minimize2, Pause, Play, Wifi, WifiOff,
 } from "lucide-react";
-import { initDerivClient, getDerivState, predictSpike } from "@/lib/deriv";
-import type { IndexType } from "@/lib/deriv";
+import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
+import { initDerivClient, getDerivState, predictSpike, getCandlesticks } from "@/lib/deriv";
+import type { IndexType, Candlestick } from "@/lib/deriv";
 
 interface SRLevel {
   price: number;
@@ -67,33 +67,44 @@ function MiniChart({ data, color }: { data: number[]; color: string }) {
   );
 }
 
-function FullChart({ data, color, label }: { data: { t: string; p: number }[]; color: string; label: string }) {
-  const min = Math.min(...data.map(d => d.p));
-  const max = Math.max(...data.map(d => d.p));
-  const range = max - min || 1;
-  const padding = range * 0.1;
+function CandleChart({ candles, color }: { candles: Candlestick[]; color: string }) {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartApiRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick", any> | null>(null);
 
-  return (
-    <ResponsiveContainer width="100%" height={300}>
-      <AreaChart data={data} margin={{ top: 10, right: 10, bottom: 10, left: 10 }}>
-        <defs>
-          <linearGradient id={`full-grad-${color.replace("#", "")}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={color} stopOpacity={0.4} />
-            <stop offset="95%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.1)" />
-        <XAxis dataKey="t" tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={{ stroke: "rgba(148,163,184,0.2)" }} tickLine={false} interval="preserveStartEnd" />
-        <YAxis domain={[min - padding, max + padding]} tick={{ fill: "#94a3b8", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(1)}K`} width={60} />
-        <Tooltip
-          contentStyle={{ backgroundColor: "#121b34", border: "1px solid rgba(124,58,237,0.2)", borderRadius: "8px", fontSize: "12px", color: "#f8fafc" }}
-          formatter={(value: number) => [`$${value.toFixed(2)}`, label]}
-          labelStyle={{ color: "#94a3b8" }}
-        />
-        <Area type="monotone" dataKey="p" stroke={color} strokeWidth={2} fill={`url(#full-grad-${color.replace("#", "")})`} dot={false} isAnimationActive={false} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (chartApiRef.current) {
+      chartApiRef.current.applyOptions({ width: chartRef.current.clientWidth, height: 300 });
+      return;
+    }
+    const chart = createChart(chartRef.current, {
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#a0aec0" },
+      grid: { vertLines: { color: "#2d3748" }, horzLines: { color: "#2d3748" } },
+      width: chartRef.current.clientWidth, height: 300,
+      crosshair: { mode: CrosshairMode.Normal },
+      timeScale: { borderColor: "#2d3748", timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: "#2d3748" },
+    });
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#22c55e", downColor: "#ef4444",
+      borderUpColor: "#22c55e", borderDownColor: "#ef4444",
+      wickUpColor: "#22c55e", wickDownColor: "#ef4444",
+    });
+    chartApiRef.current = chart;
+    seriesRef.current = series;
+    const handleResize = () => { if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth }); };
+    window.addEventListener("resize", handleResize);
+    return () => { window.removeEventListener("resize", handleResize); chart.remove(); chartApiRef.current = null; seriesRef.current = null; };
+  }, []);
+
+  useEffect(() => {
+    if (seriesRef.current && candles.length > 0) {
+      seriesRef.current.setData(candles.map(c => ({ time: c.time as any, open: c.open, high: c.high, low: c.low, close: c.close })));
+    }
+  }, [candles]);
+
+  return <div ref={chartRef} className="w-full" style={{ height: 300 }} />;
 }
 
 export default function DerivChart() {
@@ -102,6 +113,7 @@ export default function DerivChart() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const pausedRef = useRef(paused);
   const [renderTick, setRenderTick] = useState(0);
+  const [candles, setCandles] = useState<Candlestick[]>([]);
 
   pausedRef.current = paused;
 
@@ -112,6 +124,17 @@ export default function DerivChart() {
     const interval = setInterval(() => setRenderTick(t => t + 1), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const parts = expanded.split("_");
+    const type = parts[0] as IndexType;
+    const num = parseInt(parts[1]);
+    const interval = setInterval(() => {
+      setCandles([...getCandlesticks(type, num)]);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [expanded]);
 
   const derivState = getDerivState();
   const source = derivState.source;
@@ -143,11 +166,6 @@ export default function DerivChart() {
     const pred = predictSpike(idx.type, idx.number);
     if (!pred || "error" in pred) return null;
     return pred as SpikePrediction;
-  };
-
-  const chartData = (key: string): { t: string; p: number }[] => {
-    const h = currentHistory(key);
-    return h.map((p, i) => ({ t: `-${h.length - i}`, p }));
   };
 
   const expandedPrediction = expanded ? getPrediction(expanded) : null;
@@ -236,7 +254,7 @@ export default function DerivChart() {
                 <Minimize2 size={18} className="text-text-muted" />
               </button>
             </div>
-            <FullChart data={chartData(expanded)} color={expanded.startsWith("BOOM") ? "#22c55e" : "#fb7185"} label={expanded} />
+            <CandleChart candles={candles} color={expanded.startsWith("BOOM") ? "#22c55e" : "#fb7185"} />
             {expandedPrediction && (
               <div className={`mt-4 p-4 rounded-xl border ${expandedPrediction.isSpikeImminent ? "border-red-500/40 bg-red-500/10" : "bg-background border-border"}`}>
                 <div className="flex items-center justify-between mb-2">
