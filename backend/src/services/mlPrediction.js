@@ -138,23 +138,12 @@ class MLPredictionService {
   }
 
   async saveModel() {
-    try {
-      await this.model.save('file://./ml_model');
-      console.log('[ML] Modèle sauvegardé');
-    } catch (err) {
-      console.error('[ML] Échec sauvegarde modèle:', err.message);
-    }
+    // Modèle sauvegardé en mémoire uniquement.
+    // Se reconstruit et se ré-entraîne après chaque redémarrage.
   }
 
   async loadModel() {
-    try {
-      this.model = await tf.loadLayersModel('file://./ml_model/model.json');
-      this.ready = true;
-      console.log('[ML] Modèle chargé depuis le disque');
-    } catch {
-      console.log('[ML] Aucun modèle sauvegardé, création nouveau modèle');
-      this.buildModel();
-    }
+    this.buildModel();
   }
 
   async retrainIfNeeded() {
