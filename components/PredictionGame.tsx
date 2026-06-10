@@ -53,7 +53,7 @@ const INDICES: IndexInfo[] = [
 
 const DERIV_URL = "https://app.deriv.com/trading";
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
-const MIN_PROBABILITY = 75;
+const MIN_PROBABILITY = 80;
 
 export default function PredictionGame() {
   const { user } = useAuth();
