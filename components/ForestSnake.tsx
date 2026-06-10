@@ -198,6 +198,7 @@ export default function ForestSnake() {
           cryptos.current.splice(i, 1);
           cryptoEaten = true;
           p.push({ ...p[p.length - 1] });
+          p.push({ ...p[p.length - 1] });
           setScore(s => s + 5);
           const loc = t[ny][nx] === "T" ? "un arbre 🌲" : "la rivière 🌊";
           msg.current = `🪙 ${cr.emoji} trouvé dans ${loc} ! +5 pts`;
@@ -246,7 +247,14 @@ export default function ForestSnake() {
         for (const ob of bots.current) {
           if (ob.id === b.id || !ob.alive) continue;
           if (ob.body.some(c => c.x === bnx2 && c.y === bny2)) {
-            if (ob.body.length > b.body.length + 1) b.alive = false;
+            if (b.body.length > ob.body.length + 1) {
+              // Bigger AI eats smaller AI
+              ob.alive = false;
+              b.body.push(...ob.body);
+            } else if (ob.body.length > b.body.length + 1) {
+              b.alive = false;
+              ob.body.push(...b.body);
+            }
             blocked = true; break;
           }
         }
@@ -496,14 +504,19 @@ export default function ForestSnake() {
           })}
         </div>
 
-        {/* Mobile controls */}
-        <div className="mt-3 flex justify-center gap-1.5">
-          <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowUp" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">↑</button>
-          <div className="flex gap-1.5">
-            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowLeft" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">←</button>
-            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowDown" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">↓</button>
-            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowRight" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">→</button>
+        {/* Mobile controls - D-pad */}
+        <div className="mt-3 flex flex-col items-center">
+          <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowUp" }); window.dispatchEvent(e); }}
+            className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light active:bg-surface-light">↑</button>
+          <div className="flex gap-1.5 -mt-0.5">
+            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowLeft" }); window.dispatchEvent(e); }}
+              className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light active:bg-surface-light">←</button>
+            <div className="w-11 h-11 flex items-center justify-center text-text-muted text-xs">⬤</div>
+            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowRight" }); window.dispatchEvent(e); }}
+              className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light active:bg-surface-light">→</button>
           </div>
+          <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowDown" }); window.dispatchEvent(e); }}
+            className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light active:bg-surface-light -mt-0.5">↓</button>
         </div>
 
         {/* Legend */}
