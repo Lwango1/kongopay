@@ -103,8 +103,9 @@ export default function MarketScanner() {
   const [connected, setConnected] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertHistory, setAlertHistory] = useState<Opportunity[]>([]);
-  const [previousImminent, setPreviousImminent] = useState<string[]>([]);
+  const previousImminentRef = useRef<string[]>([]);
   const [expandedOpportunity, setExpandedOpportunity] = useState<string | null>(null);
+  const [waitingData, setWaitingData] = useState(true);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);
@@ -134,33 +135,40 @@ export default function MarketScanner() {
     if (pausedRef.current) return;
     try {
       const data = scanAllMarkets();
+      if (!data) return;
       setResult(data as unknown as ScanResult);
       const isConnected = data.source === "deriv-live";
       setConnected(isConnected);
 
       if (isConnected) {
+        const hasData = data.opportunities.length > 0;
+        setWaitingData(!hasData);
+
         const imminentKeys = data.opportunities
           .filter(o => o.isSpikeImminent)
           .map(o => `${o.type}_${o.number}`);
 
-        const newAlerts = imminentKeys.filter(k => !previousImminent.includes(k));
+        const prev = previousImminentRef.current;
+        const newAlerts = imminentKeys.filter(k => !prev.includes(k));
         if (newAlerts.length > 0) {
           playAlertSound();
           const newOpps = data.opportunities.filter(o =>
             newAlerts.includes(`${o.type}_${o.number}`)
           );
-          setAlertHistory(prev => [...newOpps, ...prev].slice(0, 50));
+          setAlertHistory(prev2 => [...newOpps, ...prev2].slice(0, 50));
         }
-        setPreviousImminent(imminentKeys);
+        previousImminentRef.current = imminentKeys;
+      } else {
+        setWaitingData(true);
       }
     } catch { /* ignore */ }
-  }, [playAlertSound, previousImminent]);
+  }, [playAlertSound]);
 
   useEffect(() => {
     initDerivClient();
-    fetchScan();
+    const initialTimer = setTimeout(fetchScan, 2000);
     const interval = setInterval(fetchScan, 1000);
-    return () => clearInterval(interval);
+    return () => { clearTimeout(initialTimer); clearInterval(interval); };
   }, [fetchScan]);
 
   const [showAll, setShowAll] = useState(false);
@@ -207,10 +215,17 @@ export default function MarketScanner() {
           </div>
         </div>
 
-        {connected && goodOpps.length === 0 && !showAll && (
+        {connected && waitingData && (
+          <div className="mb-6 p-4 rounded-xl border border-border bg-surface/50 text-center text-sm text-text-secondary animate-pulse">
+            <Gauge size={20} className="inline mr-2 text-primary" />
+            Connexion établie, chargement des données historiques...
+          </div>
+        )}
+
+        {connected && !waitingData && goodOpps.length === 0 && !showAll && (
           <div className="mb-6 p-4 rounded-xl border border-border bg-surface/50 text-center text-sm text-text-secondary">
             <Gauge size={20} className="inline mr-2 text-primary" />
-            Aucune opportunité significative pour le moment. Le scan surveille les 6 indices en continu.
+            Aucune opportunité ≥80% pour le moment. Le scan surveille les 6 indices en continu.
           </div>
         )}
 

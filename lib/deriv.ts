@@ -1148,7 +1148,7 @@ export function scanAllMarkets(): MarketScanResult {
   for (const idx of INDICES) {
     const key = getKey(idx.type, idx.number);
     const st = stateMap.get(key);
-    if (!st || st.history.length < 20) continue;
+    if (!st || st.history.length < 30) continue;
 
     const prediction = predictSpike(idx.type, idx.number);
     if (!prediction || "error" in prediction) continue;
