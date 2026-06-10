@@ -8,12 +8,13 @@ export const metadata: Metadata = {
   description: "Plateforme crypto simple et sécurisée pour l'Afrique francophone",
 };
 
-const AD_CLIENT = process.env.NEXT_PUBLIC_ADSENSE_ID || "";
+const AD_CLIENT = process.env.NEXT_PUBLIC_ADSENSE_ID || "ca-pub-7941414743853220";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
       <head>
+        <meta name="google-adsense-account" content="ca-pub-7941414743853220" />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
