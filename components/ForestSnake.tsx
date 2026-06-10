@@ -1,489 +1,519 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
-const S = 20;
-const COLS = 28;
-const ROWS = 28;
-const TICK = 150;
-const COINS = ["₿", "ETH", "SOL", "ADA", "DOT", "LINK"];
-const AI_COLORS = ["#ef4444", "#a855f7", "#f97316", "#06b6d4", "#ec4899", "#84cc16"];
-const AI_NAMES = ["Boa", "Cobra", "Anaconda", "Viper", "Python", "Mamba"];
+const COLS = 30;
+const ROWS = 30;
+const CELL = 18;
+const TICK = 160;
+const COINS = ["₿", "ETH", "SOL", "ADA", "DOT"];
 
-type Dir = "UP" | "DOWN" | "LEFT" | "RIGHT";
-type Terrain = "grass" | "tree" | "river";
+type Dir = "U" | "D" | "L" | "R";
+const OPP: Record<Dir, Dir> = { U: "D", D: "U", L: "R", R: "L" };
+const DX: Record<Dir, number> = { U: 0, D: 0, L: -1, R: 1 };
+const DY: Record<Dir, number> = { U: -1, D: 1, L: 0, R: 0 };
 
-const OPP: Record<Dir, Dir> = { UP: "DOWN", DOWN: "UP", LEFT: "RIGHT", RIGHT: "LEFT" };
-const DX: Record<Dir, number> = { UP: 0, DOWN: 0, LEFT: -1, RIGHT: 1 };
-const DY: Record<Dir, number> = { UP: -1, DOWN: 1, LEFT: 0, RIGHT: 0 };
+function rng(n: number) { return Math.floor(Math.random() * n); }
 
-function rand(n: number) { return Math.floor(Math.random() * n); }
-
-function genTerrain(): Terrain[][] {
-  const g: Terrain[][] = Array.from({ length: ROWS }, () => Array(COLS).fill("grass"));
-
+function makeTerrain() {
+  const g: string[][] = Array.from({ length: ROWS }, () => Array(COLS).fill("."));
   // River
-  let ry = 4 + rand(ROWS - 8);
+  let ry = 3 + rng(ROWS - 6);
   for (let x = 0; x < COLS; x++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      const yy = ry + dy;
-      if (yy >= 0 && yy < ROWS) g[yy][x] = "river";
-    }
-    if (Math.random() < 0.35) ry += Math.random() < 0.5 ? 1 : -1;
+    for (let d = -1; d <= 1; d++) { const yy = ry + d; if (yy >= 0 && yy < ROWS) g[yy][x] = "~"; }
+    if (Math.random() < 0.3) ry += Math.random() < 0.5 ? 1 : -1;
     ry = Math.max(2, Math.min(ROWS - 3, ry));
   }
-
-  // Tree clusters
-  for (let c = 0; c < 10; c++) {
-    const cx = 2 + rand(COLS - 4);
-    const cy = 2 + rand(ROWS - 4);
-    for (let i = 0; i < 8 + rand(6); i++) {
-      const tx = cx + (rand(5) - 2);
-      const ty = cy + (rand(5) - 2);
-      if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS && g[ty][tx] === "grass") {
-        g[ty][tx] = "tree";
-      }
+  // Trees
+  for (let c = 0; c < 12; c++) {
+    const cx = 2 + rng(COLS - 4), cy = 2 + rng(ROWS - 4);
+    for (let i = 0; i < 6 + rng(5); i++) {
+      const tx = cx + rng(5) - 2, ty = cy + rng(5) - 2;
+      if (tx >= 0 && tx < COLS && ty >= 0 && ty < ROWS && g[ty][tx] === ".") g[ty][tx] = "T";
     }
   }
   return g;
 }
 
-function randomGrass(terrain: Terrain[][]): { x: number; y: number } | null {
-  for (let i = 0; i < 100; i++) {
-    const x = rand(COLS), y = rand(ROWS);
-    if (terrain[y][x] === "grass") return { x, y };
-  }
+function grassCell(g: string[][]) {
+  for (let i = 0; i < 200; i++) { const x = rng(COLS), y = rng(ROWS); if (g[y][x] === ".") return { x, y }; }
   return null;
 }
 
-function randomRiverOrTree(terrain: Terrain[][]): { x: number; y: number } | null {
-  for (let i = 0; i < 100; i++) {
-    const x = rand(COLS), y = rand(ROWS);
-    if (terrain[y][x] === "river" || terrain[y][x] === "tree") return { x, y };
-  }
+function specialCell(g: string[][]) {
+  for (let i = 0; i < 200; i++) { const x = rng(COLS), y = rng(ROWS); if (g[y][x] === "T" || g[y][x] === "~") return { x, y }; }
   return null;
 }
 
-function spawnSnake(len: number, terrain: Terrain[][], dir: Dir, existing: { x: number; y: number }[]): { body: { x: number; y: number }[]; dir: Dir } | null {
-  for (let attempt = 0; attempt < 50; attempt++) {
-    const h = randomGrass(terrain);
-    if (!h) return null;
-    const body = [{ x: h.x, y: h.y }];
-    let ok = true;
-    for (let i = 1; i < len; i++) {
-      const px = body[i - 1].x - DX[dir];
-      const py = body[i - 1].y - DY[dir];
-      if (px < 0 || px >= COLS || py < 0 || py >= ROWS || terrain[py][px] !== "grass") { ok = false; break; }
-      if (existing.some(e => e.x === px && e.y === py)) { ok = false; break; }
-      body.push({ x: px, y: py });
-    }
-    if (ok) { existing.push(...body); return { body, dir }; }
-  }
-  return null;
-}
+interface Seg { x: number; y: number }
+interface Bot { id: number; body: Seg[]; dir: Dir; alive: boolean; color: string; name: string }
+
+const BOT_COLORS = ["#ef4444", "#a855f7", "#f97316", "#06b6d4", "#ec4899"];
+const BOT_NAMES = ["Boa", "Cobra", "Naga", "Viper", "Mamba"];
 
 export default function ForestSnake() {
-  const terrainRef = useRef(genTerrain());
-  const [terrain] = useState(terrainRef.current);
+  const terrain = useRef(makeTerrain());
 
-  type SnakeState = { id: string; body: { x: number; y: number }[]; dir: Dir; alive: boolean; isPlayer: boolean; color: string; name: string };
-  type CryptoState = { x: number; y: number; emoji: string };
+  // Game state refs (no re-render)
+  const pBody = useRef<Seg[]>([{ x: 12, y: 15 }, { x: 11, y: 15 }, { x: 10, y: 15 }]);
+  const pDir = useRef<Dir>("R");
+  const pNextDir = useRef<Dir>("R");
+  const bots = useRef<Bot[]>([]);
+  const cryptos = useRef<{ x: number; y: number; emoji: string }[]>([]);
+  const alive = useRef(true);
+  const msg = useRef("");
+  const msgTimer = useRef(0);
+  const tickC = useRef(0);
 
-  const initGame = useCallback(() => {
-    const t = terrainRef.current;
-    const existing: { x: number; y: number }[] = [];
-    const pSpawn = spawnSnake(3, t, "RIGHT", existing);
-    if (!pSpawn) return null;
-    const player: SnakeState = { id: "player", body: pSpawn.body, dir: "RIGHT", alive: true, isPlayer: true, color: "#22c55e", name: "Toi" };
-    const ai: SnakeState[] = [];
-    const usedColors = new Set<string>();
-    for (let i = 0; i < 4; i++) {
-      const len = 3 + rand(5);
-      const aSpawn = spawnSnake(len, t, (["UP", "DOWN", "LEFT", "RIGHT"] as Dir[])[rand(4)], existing);
-      if (!aSpawn) continue;
-      const c = AI_COLORS[i % AI_COLORS.length];
-      usedColors.add(c);
-      ai.push({ id: `ai${i}`, body: aSpawn.body, dir: aSpawn.dir, alive: true, isPlayer: false, color: c, name: AI_NAMES[i % AI_NAMES.length] });
-    }
-    const cryptos: CryptoState[] = [];
-    for (let i = 0; i < 10; i++) {
-      const p = randomRiverOrTree(t);
-      if (p) cryptos.push({ x: p.x, y: p.y, emoji: COINS[i % COINS.length] });
-    }
-    return { player, ai, cryptos };
-  }, []);
-
-  const [gameState, setGameState] = useState<{ player: SnakeState; ai: SnakeState[]; cryptos: CryptoState[] } | null>(null);
-  const [gameOver, setGameOver] = useState(false);
-  const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState(0);
+  // Force render counter
+  const [tick, setTick] = useState(0);
   const [started, setStarted] = useState(false);
-  const [message, setMessage] = useState("");
-  const dirRef = useRef<Dir>("RIGHT");
-  const gameRef = useRef<typeof gameState>(null);
-  const tickRef = useRef(0);
+  const [over, setOver] = useState(false);
+  const [score, setScore] = useState(0);
+  const [hi, setHi] = useState(0);
 
-  const start = () => {
-    const g = initGame();
-    if (!g) return;
-    setGameState(g);
-    gameRef.current = g;
-    setGameOver(false);
+  const rerender = () => setTick(t => t + 1);
+
+  const startGame = () => {
+    const t = terrain.current;
+    pBody.current = [{ x: 12, y: 15 }, { x: 11, y: 15 }, { x: 10, y: 15 }];
+    pDir.current = "R";
+    pNextDir.current = "R";
+    alive.current = true;
+    msg.current = "";
+    msgTimer.current = 0;
+    tickC.current = 0;
+    const used = [...pBody.current];
+
+    const newBots: Bot[] = [];
+    for (let i = 0; i < 4; i++) {
+      const len = 3 + rng(4);
+      for (let a = 0; a < 50; a++) {
+        const h = grassCell(t); if (!h) break;
+        const dir = (["U", "D", "L", "R"] as Dir[])[rng(4)];
+        const body: Seg[] = [{ x: h.x, y: h.y }];
+        let ok = true;
+        for (let j = 1; j < len; j++) {
+          const px = body[j - 1].x - DX[dir], py = body[j - 1].y - DY[dir];
+          if (px < 0 || px >= COLS || py < 0 || py >= ROWS || t[py][px] !== ".") { ok = false; break; }
+          if (used.some(u => u.x === px && u.y === py)) { ok = false; break; }
+          body.push({ x: px, y: py });
+        }
+        if (ok) {
+          used.push(...body);
+          newBots.push({ id: i, body, dir, alive: true, color: BOT_COLORS[i], name: BOT_NAMES[i] });
+          break;
+        }
+      }
+    }
+    bots.current = newBots;
+
+    const newCryptos: { x: number; y: number; emoji: string }[] = [];
+    for (let i = 0; i < 10; i++) {
+      const p = specialCell(t); if (p) newCryptos.push({ x: p.x, y: p.y, emoji: COINS[rng(COINS.length)] });
+    }
+    cryptos.current = newCryptos;
+
     setScore(0);
+    setOver(false);
     setStarted(true);
-    setMessage("");
-    dirRef.current = "RIGHT";
-    tickRef.current = 0;
+    rerender();
   };
 
+  // Keyboard
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (!started) { if (e.key.startsWith("Arrow")) { start(); } return; }
-      if (gameOver) return;
-      const k = e.key.replace("Arrow", "").toUpperCase() as Dir;
-      if (!["UP", "DOWN", "LEFT", "RIGHT"].includes(k)) return;
-      if (k === OPP[dirRef.current]) return;
-      dirRef.current = k;
+      if (!e.key.startsWith("Arrow")) return;
+      e.preventDefault();
+      if (!started) { startGame(); return; }
+      if (!alive.current) return;
+      const k = ({ ArrowUp: "U", ArrowDown: "D", ArrowLeft: "L", ArrowRight: "R" } as Record<string, Dir>)[e.key];
+      if (!k) return;
+      if (k === OPP[pDir.current]) return;
+      pNextDir.current = k;
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [started, gameOver]);
+  }, [started]);
 
+  // Game loop
   useEffect(() => {
-    if (!started || gameOver || !gameState) return;
+    if (!started || over) return;
     const interval = setInterval(() => {
-      setGameState(prev => {
-        if (!prev) return prev;
-        const g = JSON.parse(JSON.stringify(prev)) as typeof prev;
-        tickRef.current++;
+      if (!alive.current) return;
+      tickC.current++;
 
-        // Move player
-        const pDir = dirRef.current;
-        const ph = g.player.body[0];
-        const pn = { x: ph.x + DX[pDir], y: ph.y + DY[pDir] };
+      const t = terrain.current;
+      const p = pBody.current;
+      const dir = pNextDir.current;
+      pDir.current = dir;
 
-        // Wall collision
-        if (pn.x < 0 || pn.x >= COLS || pn.y < 0 || pn.y >= ROWS) {
-          setGameOver(true);
-          setHighScore(h => Math.max(h, score));
-          setMessage("💀 Le serpent s'est cogné contre un arbre !");
-          return prev;
+      const h = p[0];
+      const nx = h.x + DX[dir], ny = h.y + DY[dir];
+
+      // Wall
+      if (nx < 0 || nx >= COLS || ny < 0 || ny >= ROWS) {
+        alive.current = false; msg.current = "💀 Mur !"; msgTimer.current = tickC.current;
+        setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
+      }
+
+      // Tree collision
+      if (t[ny][nx] === "T") {
+        alive.current = false; msg.current = "💀 Collision avec un arbre !"; msgTimer.current = tickC.current;
+        setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
+      }
+
+      // Self collision
+      if (p.some(c => c.x === nx && c.y === ny)) {
+        alive.current = false; msg.current = "💀 Tu t'es mordu la queue !"; msgTimer.current = tickC.current;
+        setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
+      }
+
+      // Check AI collisions
+      let aiEatenThisTick = false;
+      for (const b of bots.current) {
+        if (!b.alive) continue;
+        if (b.body.some(c => c.x === nx && c.y === ny)) {
+          if (p.length > b.body.length + 1) {
+            b.alive = false;
+            const bonus = b.body.length;
+            p.push(...b.body);
+            setScore(s => s + 15 + bonus);
+            msg.current = `🐍 ${b.name} mangé ! +${15 + bonus} pts`;
+            msgTimer.current = tickC.current;
+            aiEatenThisTick = true;
+          } else {
+            alive.current = false; msg.current = `💀 ${b.name} t'a mangé !`; msgTimer.current = tickC.current;
+            setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
+          }
+          break;
         }
+      }
 
-        // Self collision
-        if (g.player.body.some(c => c.x === pn.x && c.y === pn.y)) {
-          setGameOver(true);
-          setHighScore(h => Math.max(h, score));
-          setMessage("💀 Le serpent s'est mordu la queue !");
-          return prev;
+      // Crypto
+      let cryptoEaten = false;
+      for (let i = cryptos.current.length - 1; i >= 0; i--) {
+        const cr = cryptos.current[i];
+        if (cr.x === nx && cr.y === ny) {
+          cryptos.current.splice(i, 1);
+          cryptoEaten = true;
+          p.push({ ...p[p.length - 1] });
+          setScore(s => s + 5);
+          const loc = t[ny][nx] === "T" ? "un arbre 🌲" : "la rivière 🌊";
+          msg.current = `🪙 ${cr.emoji} trouvé dans ${loc} ! +5 pts`;
+          msgTimer.current = tickC.current;
+          const np = specialCell(t); if (np) cryptos.current.push({ x: np.x, y: np.y, emoji: COINS[rng(COINS.length)] });
+          break;
         }
+      }
 
-        // AI collision
-        let eaten = false;
-        for (const ai of g.ai) {
-          if (!ai.alive) continue;
-          if (ai.body.some(c => c.x === pn.x && c.y === pn.y)) {
-            const myLen = g.player.body.length;
-            const aiLen = ai.body.length;
-            if (myLen > aiLen + 2) {
-              // Eat AI
-              ai.alive = false;
-              const bonus = aiLen;
-              for (let i = ai.body.length - 1; i >= 0; i--) {
-                g.player.body.push(ai.body[i]);
-              }
-              setScore(s => s + 10 + bonus);
-              setMessage(`🐍 Tu as mangé ${ai.name} ! +${10 + bonus} pts`);
-            } else {
-              setGameOver(true);
-              setHighScore(h => Math.max(h, score));
-              setMessage(`💀 ${ai.name} t'a mangé !`);
-              return prev;
-            }
-            eaten = true;
-            break;
-          }
+      // Move player
+      p.unshift({ x: nx, y: ny });
+      if (!cryptoEaten && !aiEatenThisTick) p.pop();
+
+      // Move AI
+      for (const b of bots.current) {
+        if (!b.alive) continue;
+        // Random direction change
+        if (Math.random() < 0.12) {
+          const dirs: Dir[] = ["U", "D", "L", "R"];
+          const nd = dirs[rng(4)];
+          if (nd !== OPP[b.dir]) b.dir = nd;
         }
-        if (eaten) { /* already handled */ }
+        const bh = b.body[0];
+        const bnx = bh.x + DX[b.dir], bny = bh.y + DY[b.dir];
 
-        // Crypto collection
-        let cryptoEaten = false;
-        g.cryptos = g.cryptos.filter(cr => {
-          if (cr.x === pn.x && cr.y === pn.y) {
-            cryptoEaten = true;
-            // Grow
-            g.player.body.push({ ...g.player.body[g.player.body.length - 1] });
-            setScore(s => s + 5);
-            setMessage(`🪙 ${cr.emoji} trouvé dans ${terrain[cr.y][cr.x] === "tree" ? "un arbre" : "la rivière"} ! +5 pts`);
-            // Respawn crypto
-            const np = randomRiverOrTree(terrain);
-            if (np) return false; // remove old, new one added below
-            return false;
-          }
-          return true;
-        });
-        if (cryptoEaten) {
-          const np = randomRiverOrTree(terrain);
-          if (np) g.cryptos.push({ x: np.x, y: np.y, emoji: COINS[rand(COINS.length)] });
-        }
-
-        // Move player body
-        g.player.body.unshift(pn);
-        if (!cryptoEaten && g.player.body.length > 3) {
-          // Only trim if we didn't grow (but we might have grown from AI)
-          let targetLen = 3;
-          let aiEatenCount = 0;
-          for (const ai of prev.ai) {
-            if (!ai.alive && !g.ai.find(a => a.id === ai.id)?.alive) aiEatenCount++;
-          }
-          // Only trim if no crypto or AI eaten this tick
-          if (!cryptoEaten && !eaten) {
-            while (g.player.body.length > targetLen + aiEatenCount * 2) {
-              g.player.body.pop();
-            }
-          }
-        }
-        // Keep proper length - actually just trim to current length
-        while (g.player.body.length > g.player.body.length) { /* noop */ }
-
-        // Move AI
-        for (const ai of g.ai) {
-          if (!ai.alive) continue;
-          // Change direction randomly
-          if (Math.random() < 0.15) {
-            const dirs: Dir[] = ["UP", "DOWN", "LEFT", "RIGHT"];
-            const nd = dirs[rand(4)];
-            if (nd !== OPP[ai.dir]) ai.dir = nd;
-          }
-
-          const ah = ai.body[0];
-          const an = { x: ah.x + DX[ai.dir], y: ah.y + DY[ai.dir] };
-
-          // AI wall check
-          if (an.x < 0 || an.x >= COLS || an.y < 0 || an.y >= ROWS || terrain[an.y][an.x] !== "grass") {
-            // Try other directions
-            const dirs: Dir[] = ["UP", "DOWN", "LEFT", "RIGHT"];
-            for (const d of dirs) {
-              if (d === OPP[ai.dir]) continue;
-              const nn = { x: ah.x + DX[d], y: ah.y + DY[d] };
-              if (nn.x >= 0 && nn.x < COLS && nn.y >= 0 && nn.y < ROWS && terrain[nn.y][nn.x] === "grass") {
-                ai.dir = d;
-                break;
-              }
-            }
-            // Still blocked - skip
-            continue;
-          }
-
-          // Check AI vs AI collision
-          let blocked = false;
-          for (const other of g.ai) {
-            if (other.id === ai.id || !other.alive) continue;
-            if (other.body.some(c => c.x === an.x && c.y === an.y)) {
-              if (other.body.length > ai.body.length + 2) {
-                ai.alive = false;
-                // Other AI eats this AI (we don't update score for AI vs AI)
-              }
-              blocked = true;
-              break;
+        // Wall/tree block
+        if (bnx < 0 || bnx >= COLS || bny < 0 || bny >= ROWS || t[bny][bnx] !== ".") {
+          const dirs: Dir[] = ["U", "D", "L", "R"];
+          let moved = false;
+          for (const d of dirs) {
+            if (d === OPP[b.dir]) continue;
+            const nnx = bh.x + DX[d], nny = bh.y + DY[d];
+            if (nnx >= 0 && nnx < COLS && nny >= 0 && nny < ROWS && t[nny][nnx] === ".") {
+              b.dir = d; moved = true; break;
             }
           }
-          if (blocked) continue;
-
-          // Check AI vs player collision
-          if (g.player.body.some(c => c.x === an.x && c.y === an.y)) {
-            const myLen = ai.body.length;
-            const pLen = g.player.body.length;
-            if (myLen > pLen + 2) {
-              setGameOver(true);
-              setHighScore(h => Math.max(h, score));
-              setMessage(`💀 ${ai.name} t'a attrapé !`);
-              return prev;
-            }
-            continue;
-          }
-
-          // Move AI body
-          ai.body.unshift(an);
-          ai.body.pop();
+          if (!moved) continue;
         }
 
-        // Increment score for survival
-        if (tickRef.current % 5 === 0) setScore(s => s + 1);
+        const bnx2 = bh.x + DX[b.dir], bny2 = bh.y + DY[b.dir];
+        // Re-check bounds
+        if (bnx2 < 0 || bnx2 >= COLS || bny2 < 0 || bny2 >= ROWS || t[bny2][bnx2] !== ".") continue;
 
-        gameRef.current = g;
-        return g;
-      });
+        // AI vs AI
+        let blocked = false;
+        for (const ob of bots.current) {
+          if (ob.id === b.id || !ob.alive) continue;
+          if (ob.body.some(c => c.x === bnx2 && c.y === bny2)) {
+            if (ob.body.length > b.body.length + 1) b.alive = false;
+            blocked = true; break;
+          }
+        }
+        if (blocked) continue;
+
+        // AI vs player
+        if (p.some(c => c.x === bnx2 && c.y === bny2)) {
+          if (b.body.length > p.length + 1) {
+            alive.current = false; msg.current = `💀 ${b.name} t'a attrapé !`; msgTimer.current = tickC.current;
+            setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
+          }
+          continue;
+        }
+
+        b.body.unshift({ x: bnx2, y: bny2 });
+        b.body.pop();
+      }
+
+      // Survival score
+      if (tickC.current % 5 === 0) setScore(s => s + 1);
+      rerender();
     }, TICK);
     return () => clearInterval(interval);
-  }, [started, gameOver, gameState, terrain]);
+  }, [started, over]);
 
-  // Cleanup unused gameState check
-  // We handle AI deaths and game over inside the setState callback
+  const msgText = msg.current && tickC.current - msgTimer.current < 30 ? msg.current : "";
 
-  // Recalculate gameOver from state changes
-  // (handled inside setState)
+  const cs = typeof window !== "undefined" ? Math.min(Math.floor((window.innerWidth - 32) / COLS), CELL) : CELL;
+  const mw = COLS * cs, mh = ROWS * cs;
 
-  const renderTerrain = (x: number, y: number) => {
-    const t = terrain[y][x];
-    if (t === "tree") return <span key={`t${x}-${y}`} className="text-md select-none">🌲</span>;
-    if (t === "river") return <span key={`r${x}-${y}`} className="text-md select-none">🌊</span>;
-    return <span key={`g${x}-${y}`} className="text-md select-none" style={{ opacity: 0.3 }}>🌿</span>;
-  };
-
-  const allSnakes = gameState
-    ? [gameState.player, ...gameState.ai.filter(a => a.alive)]
-    : [];
-
-  const snakePositions = new Map<string, { x: number; y: number; isHead: boolean; color: string; name: string }>();
-  if (gameState) {
-    for (const s of [gameState.player, ...gameState.ai]) {
-      if (!s.alive) continue;
-      s.body.forEach((c, i) => {
-        snakePositions.set(`${c.x}-${c.y}`, { x: c.x, y: c.y, isHead: i === 0, color: s.color, name: s.name });
-      });
-    }
-  }
-
-  const cellSize = Math.min(Math.floor((typeof window !== "undefined" ? Math.min(window.innerWidth - 40, 600) : 600) / COLS), 22);
+  // Determine snake head direction for eyes
+  const headDir = pDir.current;
 
   return (
-    <section className="py-16 px-2 border-t border-border">
+    <section className="py-12 px-2 border-t border-border">
       <div className="max-w-3xl mx-auto text-center">
         <h2 className="text-2xl font-bold mb-1">🐍 Forêt des Cryptos</h2>
-        <p className="text-text-secondary text-sm mb-4 max-w-lg mx-auto">
-          Cherche les cryptos dans les arbres 🌲 et la rivière 🌊. Mange des petits serpents pour grandir,
-          évite les plus gros que toi !
+        <p className="text-text-secondary text-xs mb-3 max-w-md mx-auto">
+          Flèches ←↑↓→ pour bouger. Mange les cryptos 🪙 dans les arbres 🌲 et rivières 🌊.
+          Mange les serpents plus petits que toi, fuis les plus gros !
         </p>
 
-        {/* HUD */}
-        <div className="flex items-center justify-center gap-3 mb-4 flex-wrap text-sm">
-          <div className="px-4 py-1.5 rounded-lg bg-surface border border-border">
+        <div className="flex items-center justify-center gap-2 mb-3 flex-wrap text-xs">
+          <div className="px-3 py-1 rounded-lg bg-surface border border-border">
             <span className="text-text-muted">Score </span>
             <span className="font-bold text-warning">{score}</span>
           </div>
-          <div className="px-4 py-1.5 rounded-lg bg-surface border border-border">
+          <div className="px-3 py-1 rounded-lg bg-surface border border-border">
             <span className="text-text-muted">Record </span>
-            <span className="font-bold text-primary">{highScore}</span>
+            <span className="font-bold text-primary">{hi}</span>
           </div>
-          <div className="px-4 py-1.5 rounded-lg bg-surface border border-border">
-            <span className="text-text-muted">Taille </span>
-            <span className="font-bold" style={{ color: "#22c55e" }}>{gameState?.player.body.length ?? 0}</span>
+          <div className="px-3 py-1 rounded-lg bg-surface border border-border">
+            <span className="text-text-muted">🐍 Taille </span>
+            <span className="font-bold" style={{ color: "#22c55e" }}>{pBody.current.length}</span>
           </div>
-          <div className="flex gap-2">
-            {gameState?.ai.filter(a => a.alive).map(a => (
-              <div key={a.id} className="flex items-center gap-1 px-2 py-1 rounded bg-surface border border-border text-xs">
-                <span className="w-2 h-2 rounded-full" style={{ background: a.color }} />
-                <span className="text-text-muted">{a.name}</span>
-                <span className="font-mono font-bold" style={{ color: a.color }}>{a.body.length}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Message */}
-        {message && (
-          <div className="mb-3 text-sm py-2 px-4 rounded-xl bg-surface border border-border animate-pulse inline-block">
-            {message}
-          </div>
-        )}
-
-        {/* Map */}
-        <div className="relative mx-auto border-2 border-border rounded-xl overflow-hidden bg-gradient-to-b from-emerald-950/40 to-emerald-900/20 shadow-2xl">
-          {!started && !gameOver && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-20">
-              <div className="text-center p-6">
-                <p className="text-5xl mb-3">🐍</p>
-                <p className="text-lg font-bold mb-1">Forêt des Cryptos</p>
-                <p className="text-xs text-text-secondary mb-4 max-w-xs">
-                  Explore la forêt, trouve les cryptos, mange des petits serpents et deviens le plus gros !
-                </p>
-                <button onClick={start} className="px-6 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors">
-                  🎮 Jouer
-                </button>
-                <div className="mt-3 flex justify-center gap-2 text-sm opacity-50">
-                  <span>←</span><span>↑</span><span>↓</span><span>→</span>
-                </div>
-              </div>
+          {bots.current.filter(b => b.alive).map(b => (
+            <div key={b.id} className="px-2 py-1 rounded bg-surface border border-border text-[10px] flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full" style={{ background: b.color }} />
+              <span className="text-text-muted">{b.name}</span>
+              <span className="font-bold" style={{ color: b.color }}>{b.body.length}</span>
             </div>
-          )}
-          {gameOver && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-20">
-              <div className="text-center p-6">
-                <p className="text-5xl mb-2">💀</p>
-                <p className="text-lg font-bold text-danger mb-1">Game Over</p>
-                <p className="text-sm text-text-secondary mb-1">Score: {score}</p>
-                <p className="text-xs text-text-muted mb-4">{message}</p>
-                <button onClick={start} className="px-6 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary/90 transition-colors">
-                  🔄 Rejouer
-                </button>
-              </div>
-            </div>
-          )}
-          <div style={{ display: "grid", gridTemplateColumns: `repeat(${COLS}, ${cellSize}px)`, gridTemplateRows: `repeat(${ROWS}, ${cellSize}px)` }}>
-            {Array.from({ length: ROWS }).map((_, y) =>
-              Array.from({ length: COLS }).map((_, x) => {
-                const t = terrain[y][x];
-                let bg = t === "tree" ? "rgba(34,197,94,0.12)" : t === "river" ? "rgba(14,165,233,0.12)" : "rgba(0,0,0,0.02)";
-                return (
-                  <div key={`c${x}-${y}`} style={{ width: cellSize, height: cellSize, background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: cellSize * 0.6 }}>
-                    {t === "tree" && "🌲"}
-                    {t === "river" && "🌊"}
-                  </div>
-                );
-              })
-            )}
-            {/* Cryptos */}
-            {gameState?.cryptos.map(cr => (
-              <div key={`cr${cr.x}-${cr.y}`} className="absolute z-10 flex items-center justify-center animate-bounce" style={{ left: cr.x * cellSize, top: cr.y * cellSize, width: cellSize, height: cellSize, fontSize: cellSize * 0.55 }}>
-                {cr.emoji}
-              </div>
-            ))}
-            {/* Snakes */}
-            {allSnakes.map(s =>
-              s.body.map((c, i) => (
-                <div key={`${s.id}-${i}`} className="absolute z-10 flex items-center justify-center" style={{
-                  left: c.x * cellSize + 1,
-                  top: c.y * cellSize + 1,
-                  width: cellSize - 2,
-                  height: cellSize - 2,
-                  borderRadius: i === 0 ? cellSize * 0.3 : cellSize * 0.15,
-                  background: i === 0
-                    ? `linear-gradient(135deg, ${s.color}, ${s.color}dd)`
-                    : s.color,
-                  opacity: 1 - i * 0.02,
-                  boxShadow: i === 0 ? `0 0 8px ${s.color}66` : "none",
-                  zIndex: 100 - i,
-                  transition: "all 0.05s",
-                  fontSize: cellSize * 0.35,
-                  fontWeight: "bold",
-                  color: "white",
-                }}>
-                  {i === 0 && (s.isPlayer ? "🐍" : "")}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Légende */}
-        <div className="mt-4 flex justify-center gap-4 text-xs text-text-muted flex-wrap">
-          <span>🌲 Arbres (cryptos)</span>
-          <span>🌊 Rivière (cryptos)</span>
-          <span>🟢 Toi</span>
-          {gameState?.ai.filter(a => a.alive).map(a => (
-            <span key={a.id} style={{ color: a.color }}>● {a.name} ({a.body.length})</span>
           ))}
         </div>
 
-        {/* Contrôles tactiles */}
-        <div className="mt-4 flex justify-center gap-2">
-          <button onClick={() => { const e = new KeyboardEvent("keydown", { key: "ArrowUp" }); window.dispatchEvent(e); }} className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light">↑</button>
-          <div className="flex gap-2">
-            <button onClick={() => { const e = new KeyboardEvent("keydown", { key: "ArrowLeft" }); window.dispatchEvent(e); }} className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light">←</button>
-            <button onClick={() => { const e = new KeyboardEvent("keydown", { key: "ArrowDown" }); window.dispatchEvent(e); }} className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light">↓</button>
-            <button onClick={() => { const e = new KeyboardEvent("keydown", { key: "ArrowRight" }); window.dispatchEvent(e); }} className="w-11 h-11 rounded-xl bg-surface border border-border text-base hover:bg-surface-light">→</button>
+        {msgText && (
+          <div className="mb-2 text-xs py-1.5 px-3 rounded-xl bg-surface border border-border inline-block">{msgText}</div>
+        )}
+
+        <div className="relative mx-auto border-2 border-border rounded-xl overflow-hidden bg-gradient-to-b from-emerald-950/30 to-emerald-900/10 shadow-2xl" style={{ width: mw, height: mh }}>
+          {!started && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-20">
+              <div className="text-center p-6">
+                <p className="text-5xl mb-2">🐍</p>
+                <p className="text-base font-bold mb-1">Forêt des Cryptos</p>
+                <p className="text-xs text-text-secondary mb-3">Serpents, cryptos et dangers t&apos;attendent !</p>
+                <button onClick={startGame} className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">🎮 Jouer</button>
+                <div className="mt-2 text-sm opacity-40">← ↑ ↓ →</div>
+              </div>
+            </div>
+          )}
+          {over && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-20">
+              <div className="text-center p-6">
+                <p className="text-4xl mb-1">💀</p>
+                <p className="text-base font-bold text-danger mb-1">Game Over</p>
+                <p className="text-xs text-text-secondary mb-1">Score: {score}</p>
+                {msgText && <p className="text-[10px] text-text-muted mb-3">{msgText}</p>}
+                <button onClick={startGame} className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">🔄 Rejouer</button>
+              </div>
+            </div>
+          )}
+
+          {/* Terrain */}
+          {Array.from({ length: ROWS }).map((_, y) =>
+            Array.from({ length: COLS }).map((_, x) => {
+              const ch = terrain.current[y][x];
+              let bg = "rgba(0,0,0,0.02)";
+              if (ch === "T") bg = "rgba(34,197,94,0.10)";
+              if (ch === "~") bg = "rgba(14,165,233,0.10)";
+              return (
+                <div key={`${x}-${y}`} style={{
+                  position: "absolute", left: x * cs, top: y * cs, width: cs, height: cs,
+                  background: bg, display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: cs * 0.55, pointerEvents: "none",
+                }}>
+                  {ch === "T" && "🌲"}{ch === "~" && "🌊"}
+                </div>
+              );
+            })
+          )}
+
+          {/* Cryptos */}
+          {cryptos.current.map((cr, i) => (
+            <div key={i} className="absolute z-10 flex items-center justify-center animate-bounce" style={{
+              left: cr.x * cs, top: cr.y * cs, width: cs, height: cs, fontSize: cs * 0.5, pointerEvents: "none",
+            }}>
+              {cr.emoji}
+            </div>
+          ))}
+
+          {/* AI Snakes */}
+          {bots.current.filter(b => b.alive).map(b =>
+            b.body.map((c, i, arr) => {
+              const isHead = i === 0;
+              const isTail = i === arr.length - 1;
+              const segLen = arr.length;
+              const size = isTail ? cs * 0.7 : cs * 0.85;
+              const offset = (cs - size) / 2;
+              const alpha = 1 - (i / segLen) * 0.35;
+
+              // Determine segment direction for rotation
+              let prevSeg = i < arr.length - 1 ? arr[i + 1] : arr[i];
+              let nextSeg = i > 0 ? arr[i - 1] : arr[i];
+              let angle = 0;
+              if (isHead) {
+                const nd = pDir.current;
+                if (nd === "R") angle = 0;
+                else if (nd === "L") angle = 180;
+                else if (nd === "D") angle = 90;
+                else if (nd === "U") angle = -90;
+              } else {
+                if (c.x < prevSeg.x) angle = 180;
+                else if (c.x > prevSeg.x) angle = 0;
+                else if (c.y < prevSeg.y) angle = -90;
+                else if (c.y > prevSeg.y) angle = 90;
+              }
+
+              return (
+                <div key={`${b.id}-${i}`} className="absolute" style={{
+                  left: c.x * cs + offset, top: c.y * cs + offset,
+                  width: size, height: size,
+                  borderRadius: isHead ? "40%" : "45%",
+                  background: isHead
+                    ? `radial-gradient(circle at 35% 35%, ${b.color}cc, ${b.color})`
+                    : b.color,
+                  opacity: alpha,
+                  boxShadow: isHead ? `0 0 6px ${b.color}55` : "none",
+                  zIndex: 50 - i,
+                  transition: "left 0.06s, top 0.06s",
+                  pointerEvents: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}>
+                  {isHead && (
+                    <>
+                      <div style={{
+                        position: "absolute", width: "100%", height: "100%",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transform: `rotate(${angle}deg)`,
+                      }}>
+                        <span style={{ fontSize: cs * 0.3, lineHeight: 1, marginTop: -1 }}>👀</span>
+                      </div>
+                    </>
+                  )}
+                  {isTail && (
+                    <div style={{
+                      width: size * 0.5, height: size * 0.5,
+                      borderRadius: "50%",
+                      background: b.color,
+                      opacity: 0.5,
+                    }} />
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          {/* Player Snake */}
+          {pBody.current.map((c, i, arr) => {
+            const isHead = i === 0;
+            const isTail = i === arr.length - 1;
+            const segLen = arr.length;
+            const size = isTail ? cs * 0.7 : cs * 0.88;
+            const offset = (cs - size) / 2;
+            const alpha = 1 - (i / segLen) * 0.3;
+
+            let angle = 0;
+            if (isHead) {
+              const nd = pDir.current;
+              if (nd === "R") angle = 0;
+              else if (nd === "L") angle = 180;
+              else if (nd === "D") angle = 90;
+              else if (nd === "U") angle = -90;
+            } else {
+              const prevSeg = i < arr.length - 1 ? arr[i + 1] : arr[i];
+              if (c.x < prevSeg.x) angle = 180;
+              else if (c.x > prevSeg.x) angle = 0;
+              else if (c.y < prevSeg.y) angle = -90;
+              else if (c.y > prevSeg.y) angle = 90;
+            }
+
+            return (
+              <div key={i} className="absolute" style={{
+                left: c.x * cs + offset, top: c.y * cs + offset,
+                width: size, height: size,
+                borderRadius: isHead ? "40%" : "45%",
+                background: isHead
+                  ? `radial-gradient(circle at 35% 35%, #4ade80, #22c55e)`
+                  : `linear-gradient(135deg, #22c55e, ${i < 3 ? "#16a34a" : "#15803d"})`,
+                opacity: alpha,
+                boxShadow: isHead ? "0 0 8px #22c55e66" : "none",
+                zIndex: 100 - i,
+                transition: "left 0.06s, top 0.06s",
+                pointerEvents: "none",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                {isHead && (
+                  <div style={{
+                    position: "absolute", width: "100%", height: "100%",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transform: `rotate(${angle}deg)`,
+                  }}>
+                    <span style={{ fontSize: cs * 0.35, lineHeight: 1, marginTop: -1.5, filter: "drop-shadow(0 0 1px #000)" }}>👀</span>
+                  </div>
+                )}
+                {isTail && (
+                  <div style={{
+                    width: size * 0.5, height: size * 0.5, borderRadius: "50%",
+                    background: "#15803d", opacity: 0.4,
+                  }} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Mobile controls */}
+        <div className="mt-3 flex justify-center gap-1.5">
+          <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowUp" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">↑</button>
+          <div className="flex gap-1.5">
+            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowLeft" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">←</button>
+            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowDown" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">↓</button>
+            <button onPointerDown={() => { const e = new KeyboardEvent("keydown", { key: "ArrowRight" }); window.dispatchEvent(e); }} className="w-10 h-10 rounded-xl bg-surface border border-border text-sm hover:bg-surface-light">→</button>
           </div>
+        </div>
+
+        {/* Legend */}
+        <div className="mt-2 flex justify-center gap-3 text-[10px] text-text-muted flex-wrap">
+          <span>🌲 Arbre (crypto)</span>
+          <span>🌊 Rivière (crypto)</span>
+          <span style={{ color: "#22c55e" }}>● Toi ({pBody.current.length})</span>
+          {bots.current.filter(b => b.alive).map(b => (
+            <span key={b.id} style={{ color: b.color }}>● {b.name} ({b.body.length})</span>
+          ))}
         </div>
       </div>
     </section>
