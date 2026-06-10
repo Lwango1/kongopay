@@ -327,11 +327,8 @@ export default function ForestSnake() {
 
   const msgText = msg.current && tickC.current - msgTimer.current < 30 ? msg.current : "";
 
-  const cs = typeof window !== "undefined" ? Math.min(Math.floor((window.innerWidth - 32) / COLS), CELL) : CELL;
+  const cs = 18;
   const mw = COLS * cs, mh = ROWS * cs;
-
-  // Determine snake head direction for eyes
-  const headDir = pDir.current;
 
   return (
     <section className="py-12 px-2 border-t border-border">
@@ -428,8 +425,10 @@ export default function ForestSnake() {
 
           {/* Cryptos */}
           {cryptos.current.map((cr, i) => (
-            <div key={i} className="absolute z-10 flex items-center justify-center animate-bounce" style={{
-              left: cr.x * cs, top: cr.y * cs, width: cs, height: cs, fontSize: cs * 0.5, pointerEvents: "none",
+            <div key={i} className="absolute z-10 flex items-center justify-center" style={{
+              width: cs, height: cs, fontSize: cs * 0.5, pointerEvents: "none",
+              transform: `translate3d(${cr.x * cs}px, ${cr.y * cs}px, 0)`,
+              willChange: "transform",
             }}>
               {cr.emoji}
             </div>
@@ -464,8 +463,8 @@ export default function ForestSnake() {
 
               return (
                 <div key={`${b.id}-${i}`} className="absolute" style={{
-                  left: c.x * cs + offset, top: c.y * cs + offset,
                   width: size, height: size,
+                  transform: `translate3d(${c.x * cs + offset}px, ${c.y * cs + offset}px, 0)`,
                   borderRadius: isHead ? "40%" : "45%",
                   background: isHead
                     ? `radial-gradient(circle at 35% 35%, ${b.color}cc, ${b.color})`
@@ -473,11 +472,11 @@ export default function ForestSnake() {
                   opacity: alpha,
                   boxShadow: isHead ? `0 0 6px ${b.color}55` : "none",
                   zIndex: 50 - i,
-                  transition: "left 0.06s, top 0.06s",
                   pointerEvents: "none",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  willChange: "transform",
                 }}>
                   {isHead && (
                     <>
@@ -529,8 +528,8 @@ export default function ForestSnake() {
 
             return (
               <div key={i} className="absolute" style={{
-                left: c.x * cs + offset, top: c.y * cs + offset,
                 width: size, height: size,
+                transform: `translate3d(${c.x * cs + offset}px, ${c.y * cs + offset}px, 0)`,
                 borderRadius: isHead ? "40%" : "45%",
                 background: isHead
                   ? `radial-gradient(circle at 35% 35%, #4ade80, #22c55e)`
@@ -538,11 +537,11 @@ export default function ForestSnake() {
                 opacity: alpha,
                 boxShadow: isHead ? "0 0 8px #22c55e66" : "none",
                 zIndex: 100 - i,
-                transition: "left 0.06s, top 0.06s",
                 pointerEvents: "none",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                willChange: "transform",
               }}>
                 {isHead && (
                   <div style={{
