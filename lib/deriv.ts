@@ -29,6 +29,9 @@ export interface TradeSignal {
   reason: string;
   isConfirmed: boolean;
   confirmationPrice: number | null;
+  indicators?: any;
+  regime?: any;
+  candlePatterns?: any[];
 }
 
 export interface Candlestick {
@@ -620,11 +623,98 @@ export function predictSpike(type: IndexType, num: number) {
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
   const orderBlocks = findOrderBlocks(history);
 
+  // --- Nouveaux indicateurs techniques ---
+  const macdResult = calculateMACD(history);
+  const bbResult = calculateBollingerBands(history);
+  const ichimokuResult = calculateIchimoku(history);
+  const stochRsi = calculateStochasticRSI(history);
+  const adx = calculateADXInternal(history);
+  const trendStrength = detectTrendStrengthInternal(history);
+  const regime = analyzeRegimeInternal(history);
+  const vwap = calculateVWAP(history);
+  // ---------------------------------------
+
+  // --- Confirmation par patterns de chandeliers ---
+  const candles1m = candleMap1m.get(key) || [];
+  const candlePatterns = detectCandlestickPatterns(candles1m.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close })));
+  const patternSignal = getPatternSignal(candlePatterns);
+  // -----------------------------------------------
+
   const upScore = scoreSignal(currentPrice, nearestSupport?.price ?? null, nearestSupport?.strength ?? 0, history, true, rsiVal, market);
   const downScore = scoreSignal(currentPrice, nearestResistance?.price ?? null, nearestResistance?.strength ?? 0, history, false, rsiVal, market);
 
   const isUp = upScore.score >= downScore.score;
-  const bestScore = isUp ? upScore.score : downScore.score;
+  let bestScore = isUp ? upScore.score : downScore.score;
+
+  // --- Ajustement par indicateurs techniques ---
+  let indicatorBonus = 0;
+
+  // MACD confirmation
+  if (macdResult) {
+    const macdBullish = macdResult.histogram > 0 && macdResult.macd > macdResult.signal;
+    const macdBearish = macdResult.histogram < 0 && macdResult.macd < macdResult.signal;
+    if (isUp && macdBullish) indicatorBonus += 0.08;
+    else if (!isUp && macdBearish) indicatorBonus += 0.08;
+    else if (isUp && macdBearish) indicatorBonus -= 0.05;
+    else if (!isUp && macdBullish) indicatorBonus -= 0.05;
+  }
+
+  // Bollinger Bands squeeze/breakout
+  if (bbResult) {
+    const nearUpper = Math.abs(currentPrice - bbResult.upper) / bbResult.upper < 0.005;
+    const nearLower = Math.abs(currentPrice - bbResult.lower) / bbResult.lower < 0.005;
+    const squeeze = bbResult.bandwidth < 0.05;
+    if (squeeze) indicatorBonus += isUp ? 0.06 : 0.06;
+    if (nearUpper && !isUp) indicatorBonus += 0.04;
+    if (nearLower && isUp) indicatorBonus += 0.04;
+  }
+
+  // Ichimoku confirmation
+  if (ichimokuResult) {
+    const priceAboveCloud = currentPrice > ichimokuResult.senkouA && currentPrice > ichimokuResult.senkouB;
+    const priceBelowCloud = currentPrice < ichimokuResult.senkouA && currentPrice < ichimokuResult.senkouB;
+    const tenkanAboveKijun = ichimokuResult.tenkan > ichimokuResult.kijun;
+    if ((isUp && priceAboveCloud && tenkanAboveKijun) || (!isUp && priceBelowCloud && !tenkanAboveKijun)) {
+      indicatorBonus += 0.07;
+    }
+  }
+
+  // StochRSI extrême
+  if (isUp && stochRsi < 20) indicatorBonus += 0.05;
+  else if (!isUp && stochRsi > 80) indicatorBonus += 0.05;
+  else if (isUp && stochRsi > 80) indicatorBonus -= 0.03;
+  else if (!isUp && stochRsi < 20) indicatorBonus -= 0.03;
+
+  // VWAP position
+  const vwapDistance = Math.abs(currentPrice - vwap) / vwap;
+  if (isUp && currentPrice < vwap && vwapDistance < 0.01) indicatorBonus += 0.04;
+  else if (!isUp && currentPrice > vwap && vwapDistance < 0.01) indicatorBonus += 0.04;
+
+  // ADX trend strength
+  if (adx > 25) {
+    indicatorBonus += isUp && trendStrength > 0 ? 0.05 : !isUp && trendStrength < 0 ? 0.05 : 0;
+  }
+
+  // --- Ajustement par patterns de chandeliers ---
+  let patternBonus = 0;
+  if (patternSignal.signal === "bullish" && isUp) {
+    patternBonus = Math.min(patternSignal.score / 10, 0.08);
+  } else if (patternSignal.signal === "bearish" && !isUp) {
+    patternBonus = Math.min(Math.abs(patternSignal.score) / 10, 0.08);
+  } else if (patternSignal.signal === "bullish" && !isUp) {
+    patternBonus = -0.04;
+  } else if (patternSignal.signal === "bearish" && isUp) {
+    patternBonus = -0.04;
+  }
+
+  // --- Ajustement par régime de volatilité ---
+  let regimeBonus = 0;
+  if (regime.market === "trending_bull" && isUp) regimeBonus += 0.06;
+  else if (regime.market === "trending_bear" && !isUp) regimeBonus += 0.06;
+  else if (regime.market === "volatile") regimeBonus += 0.03;
+  else if (regime.market === "calm") regimeBonus -= 0.02;
+
+  bestScore = Math.min(bestScore + indicatorBonus + patternBonus + regimeBonus, 1);
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   const recoveryTime = Math.min(msSinceLastSpike / 60000, 1);
@@ -658,6 +748,17 @@ export function predictSpike(type: IndexType, num: number) {
   }
   probability = Math.min(Math.max(probability + tfBonus * 100, 0), 97);
 
+  // Ajustement SL/TP selon volatilité
+  let slMultiplier = 0.6;
+  let tpMultiplier = 1.8;
+  if (regime.market === "volatile") {
+    slMultiplier = 0.8;
+    tpMultiplier = 2.2;
+  } else if (regime.market === "calm") {
+    slMultiplier = 0.4;
+    tpMultiplier = 1.4;
+  }
+
   const volFactor = num === 1000 ? 0.6 : num === 900 ? 0.8 : 1;
   const magnitudePct = (0.008 + bestScore * 0.04) * volFactor;
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
@@ -677,8 +778,8 @@ export function predictSpike(type: IndexType, num: number) {
     ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
     : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
 
-  const slBuffer = vol * 0.6;
-  const tpBuffer = vol * 1.8;
+  const slBuffer = vol * slMultiplier;
+  const tpBuffer = vol * tpMultiplier;
 
   const stopLoss = isUp
     ? Math.min(entryLevel * 0.996, entryLevel - slBuffer)
@@ -753,7 +854,208 @@ export function predictSpike(type: IndexType, num: number) {
     takeProfit: Math.round(takeProfit * 100) / 100,
     isConfirmed,
     confirmationPrice: confirmationPrice ? Math.round(confirmationPrice * 100) / 100 : null,
+    // Nouveaux champs pour analyse
+    indicators: {
+      macd: macdResult ? { histogram: Math.round(macdResult.histogram * 10000) / 10000, signal: Math.round(macdResult.signal * 100) / 100, macd: Math.round(macdResult.macd * 100) / 100 } : null,
+      bollinger: bbResult ? { bandwidth: Math.round(bbResult.bandwidth * 10000) / 10000, upper: Math.round(bbResult.upper * 100) / 100, lower: Math.round(bbResult.lower * 100) / 100 } : null,
+      ichimoku: ichimokuResult ? { tenkan: Math.round(ichimokuResult.tenkan * 100) / 100, kijun: Math.round(ichimokuResult.kijun * 100) / 100, senkouA: Math.round(ichimokuResult.senkouA * 100) / 100, senkouB: Math.round(ichimokuResult.senkouB * 100) / 100 } : null,
+      stochRsi: Math.round(stochRsi * 100) / 100,
+      adx: Math.round(adx * 10) / 10,
+      trendStrength: Math.round(trendStrength * 10) / 10,
+      vwapDistance: Math.round(vwapDistance * 10000) / 10000,
+    },
+    regime: {
+      volatility: regime.volatility,
+      market: regime.market,
+      adx: regime.adx,
+      recommendation: regime.recommendation,
+    },
+    candlePatterns: candlePatterns.slice(0, 3).map(p => ({ name: p.name, signal: p.signal, strength: p.strength })),
   };
+}
+
+// Fonctions helper internes (sans import pour éviter les dépendances circulaires)
+function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } | null {
+  if (prices.length < 35) return null;
+  const fastPeriod = 12, slowPeriod = 26, signalPeriod = 9;
+  const multiplierFast = 2 / (fastPeriod + 1);
+  const multiplierSlow = 2 / (slowPeriod + 1);
+  const fastEMA: number[] = [];
+  const slowEMA: number[] = [];
+  const sumFast = prices.slice(0, fastPeriod).reduce((a, b) => a + b, 0);
+  const sumSlow = prices.slice(0, slowPeriod).reduce((a, b) => a + b, 0);
+  fastEMA.push(sumFast / fastPeriod);
+  slowEMA.push(sumSlow / slowPeriod);
+  for (let i = fastPeriod; i < prices.length; i++) fastEMA.push((prices[i] - fastEMA[fastEMA.length - 1]) * multiplierFast + fastEMA[fastEMA.length - 1]);
+  for (let i = slowPeriod; i < prices.length; i++) slowEMA.push((prices[i] - slowEMA[slowEMA.length - 1]) * multiplierSlow + slowEMA[slowEMA.length - 1]);
+  const offset = fastEMA.length - slowEMA.length;
+  const macdLine: number[] = [];
+  for (let i = 0; i < slowEMA.length; i++) macdLine.push(fastEMA[offset + i] - slowEMA[i]);
+  const multiplierSignal = 2 / (signalPeriod + 1);
+  const signalLine: number[] = [macdLine.slice(0, signalPeriod).reduce((a, b) => a + b, 0) / signalPeriod];
+  for (let i = signalPeriod; i < macdLine.length; i++) signalLine.push((macdLine[i] - signalLine[signalLine.length - 1]) * multiplierSignal + signalLine[signalLine.length - 1]);
+  const lastMacd = macdLine[macdLine.length - 1];
+  const lastSignal = signalLine[signalLine.length - 1];
+  return { macd: lastMacd, signal: lastSignal, histogram: lastMacd - lastSignal };
+}
+
+function calculateBollingerBands(prices: number[]): { upper: number; middle: number; lower: number; bandwidth: number } | null {
+  const period = 20;
+  if (prices.length < period) return null;
+  const slice = prices.slice(-period);
+  const middle = slice.reduce((a, b) => a + b, 0) / period;
+  const variance = slice.reduce((sum, p) => sum + (p - middle) ** 2, 0) / period;
+  const stdDev = Math.sqrt(variance);
+  return { upper: middle + stdDev * 2, middle, lower: middle - stdDev * 2, bandwidth: (stdDev * 4) / middle };
+}
+
+function calculateIchimoku(prices: number[]): { tenkan: number; kijun: number; senkouA: number; senkouB: number } | null {
+  if (prices.length < 52) return null;
+  const tenkan = (Math.max(...prices.slice(-9)) + Math.min(...prices.slice(-9))) / 2;
+  const kijun = (Math.max(...prices.slice(-26)) + Math.min(...prices.slice(-26))) / 2;
+  const senkouA = (tenkan + kijun) / 2;
+  const senkouB = (Math.max(...prices.slice(-52)) + Math.min(...prices.slice(-52))) / 2;
+  return { tenkan, kijun, senkouA, senkouB };
+}
+
+function calculateStochasticRSI(prices: number[]): number {
+  const rsiValues: number[] = [];
+  for (let i = 14; i < prices.length; i++) {
+    const slice = prices.slice(i - 14, i + 1);
+    if (slice.length < 15) continue;
+    let gains = 0, losses = 0;
+    for (let j = 1; j < slice.length; j++) {
+      const diff = slice[j] - slice[j - 1];
+      if (diff > 0) gains += diff; else losses -= diff;
+    }
+    if (losses === 0) rsiValues.push(100);
+    else rsiValues.push(100 - 100 / (1 + gains / losses));
+  }
+  if (rsiValues.length < 14) return 50;
+  const recent = rsiValues.slice(-14);
+  const minR = Math.min(...recent);
+  const maxR = Math.max(...recent);
+  return maxR === minR ? 50 : ((rsiValues[rsiValues.length - 1] - minR) / (maxR - minR)) * 100;
+}
+
+function calculateADXInternal(prices: number[]): number {
+  if (prices.length < 28) return 25;
+  const upMoves: number[] = [];
+  const downMoves: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    upMoves.push(diff > 0 ? diff : 0);
+    downMoves.push(diff < 0 ? -diff : 0);
+  }
+  const period = 14;
+  const smoothUp: number[] = [upMoves.slice(0, period).reduce((a, b) => a + b, 0) / period];
+  const smoothDown: number[] = [downMoves.slice(0, period).reduce((a, b) => a + b, 0) / period];
+  for (let i = period; i < upMoves.length; i++) {
+    smoothUp.push((smoothUp[smoothUp.length - 1] * (period - 1) + upMoves[i]) / period);
+    smoothDown.push((smoothDown[smoothDown.length - 1] * (period - 1) + downMoves[i]) / period);
+  }
+  const diPlus: number[] = [];
+  const diMinus: number[] = [];
+  for (let i = 0; i < smoothUp.length; i++) {
+    const sum = smoothUp[i] + smoothDown[i];
+    diPlus.push(sum > 0 ? (smoothUp[i] / sum) * 100 : 0);
+    diMinus.push(sum > 0 ? (smoothDown[i] / sum) * 100 : 0);
+  }
+  const dx: number[] = [];
+  for (let i = 0; i < diPlus.length; i++) {
+    const diff = Math.abs(diPlus[i] - diMinus[i]);
+    const sum = diPlus[i] + diMinus[i];
+    dx.push(sum > 0 ? (diff / sum) * 100 : 0);
+  }
+  if (dx.length < period) return 25;
+  const adxSlice = dx.slice(-period);
+  return adxSlice.reduce((a, b) => a + b, 0) / period;
+}
+
+function detectTrendStrengthInternal(prices: number[]): number {
+  if (prices.length < 40) return 0;
+  const short = prices.slice(-10);
+  const long = prices.slice(-40);
+  const shortSlope = (short[short.length - 1] - short[0]) / short.length;
+  const longSlope = (long[long.length - 1] - long[0]) / long.length;
+  const basePrice = long.reduce((a, b) => a + b, 0) / long.length || 1;
+  if (shortSlope > 0 && longSlope > 0) return ((shortSlope / basePrice) * 100 + (longSlope / basePrice) * 25) * 10;
+  if (shortSlope < 0 && longSlope < 0) return -((Math.abs(shortSlope / basePrice) * 100 + Math.abs(longSlope / basePrice) * 25) * 10);
+  return 0;
+}
+
+function analyzeRegimeInternal(prices: number[]): { volatility: string; market: string; adx: number; recommendation: string } {
+  if (prices.length < 50) return { volatility: "medium", market: "ranging", adx: 25, recommendation: "Données insuffisantes" };
+  const atr14 = atr(prices, 14);
+  const atr50 = atr(prices, 50);
+  const volatility = atr50 > 0 ? (atr14 / atr50 > 1.5 ? "high" : atr14 / atr50 < 0.7 ? "low" : "medium") : "medium";
+  const adxVal = calculateADXInternal(prices);
+  const trendStrength = detectTrendStrengthInternal(prices);
+  let market: string;
+  let recommendation: string;
+
+  if (adxVal > 25 && trendStrength > 15) {
+    market = "trending_bull";
+    recommendation = "Tendance haussière détectée";
+  } else if (adxVal > 25 && trendStrength < -15) {
+    market = "trending_bear";
+    recommendation = "Tendance baissière détectée";
+  } else if (volatility === "high") {
+    market = "volatile";
+    recommendation = "Volatilité élevée, stops larges recommandés";
+  } else if (adxVal < 20) {
+    market = "calm";
+    recommendation = "Marché calme, attendre confirmation";
+  } else {
+    market = "ranging";
+    recommendation = "Marché range, scalping recommandé";
+  }
+
+  return { volatility, market, adx: Math.round(adxVal * 10) / 10, recommendation };
+}
+
+function calculateVWAP(prices: number[]): number {
+  if (prices.length === 0) return 0;
+  const total = prices.reduce((sum, p, i) => sum + p * (i + 1), 0);
+  const vol = (prices.length * (prices.length + 1)) / 2;
+  return total / vol;
+}
+
+function detectCandlestickPatterns(candles: { open: number; high: number; low: number; close: number }[]): { name: string; signal: string; strength: number }[] {
+  if (candles.length < 3) return [];
+  const patterns: { name: string; signal: string; strength: number }[] = [];
+  const curr = candles[candles.length - 1];
+  const prev = candles[candles.length - 2];
+
+  const body = Math.abs(curr.close - curr.open);
+  const range = curr.high - curr.low;
+  const isDoji = range > 0 && body / range < 0.001;
+  if (isDoji) patterns.push({ name: "Doji", signal: "neutral", strength: 1 });
+
+  const lowerWick = Math.min(curr.open, curr.close) - curr.low;
+  const upperWick = curr.high - Math.max(curr.open, curr.close);
+  const isHammer = range > 0 && body < range * 0.3 && lowerWick > body * 2 && upperWick < body * 0.5;
+  if (isHammer) patterns.push({ name: "Hammer", signal: "bullish", strength: 3 });
+
+  const isShootingStar = range > 0 && body < range * 0.3 && upperWick > body * 2 && lowerWick < body * 0.5;
+  if (isShootingStar) patterns.push({ name: "Shooting Star", signal: "bearish", strength: 3 });
+
+  const isBullEngulf = prev.close < prev.open && curr.close > curr.open && curr.open < prev.close && curr.close > prev.open;
+  if (isBullEngulf) patterns.push({ name: "Bullish Engulfing", signal: "bullish", strength: 3 });
+
+  const isBearEngulf = prev.close > prev.open && curr.close < curr.open && curr.open > prev.close && curr.close < prev.open;
+  if (isBearEngulf) patterns.push({ name: "Bearish Engulfing", signal: "bearish", strength: 3 });
+
+  return patterns;
+}
+
+function getPatternSignal(patterns: { name: string; signal: string; strength: number }[]): { signal: string; score: number } {
+  let score = 0;
+  for (const p of patterns) {
+    if (p.signal === "bullish") score += p.strength;
+    else if (p.signal === "bearish") score -= p.strength;
+  }
+  return { signal: score > 2 ? "bullish" : score < -2 ? "bearish" : "neutral", score };
 }
 
 export function predictNextTick(type: IndexType, num: number) {
@@ -818,6 +1120,9 @@ export interface MarketOpportunity {
   orderBlocks: { price: number; type: "bullish" | "bearish"; strength: number }[];
   connected: boolean;
   timestamp: number;
+  indicators?: any;
+  regime?: any;
+  candlePatterns?: any[];
 }
 
 export interface MarketScanResult {

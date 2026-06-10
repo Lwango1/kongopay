@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { apiLimiter, authLimiter } from './middleware/rateLimiter.js';
 import { derivService } from './services/deriv.js';
 import { mlService } from './services/mlPrediction.js';
+import { ensembleML } from './services/ensembleML.js';
 import { signalTracker } from './services/signalTracker.js';
 import authRoutes from './routes/auth.js';
 import walletRoutes from './routes/wallet.js';
@@ -56,6 +57,7 @@ app.use(errorHandler);
 
 async function startBackgroundTasks() {
   mlService.init();
+  ensembleML.init();
 
   const derivGetPrice = async (type, num) => {
     const key = `${type}_${num}`;
@@ -76,6 +78,12 @@ async function startBackgroundTasks() {
       }
     } catch { /* background */ }
   }, 30000);
+
+  setInterval(async () => {
+    try {
+      await ensembleML.retrainIfNeeded();
+    } catch { /* background */ }
+  }, 60 * 60 * 1000);
 }
 
 app.listen(PORT, () => {

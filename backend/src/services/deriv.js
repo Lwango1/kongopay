@@ -498,6 +498,7 @@ class DerivLiveService {
     const atr = this.calculateATR(history);
     const atrRatio = atr / (prediction.currentPrice || 1);
 
+    // Improved feature extraction with new indicators
     const features = {
       rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
       atr_ratio: atrRatio,
@@ -509,10 +510,16 @@ class DerivLiveService {
       sr_distance: prediction.distancePercent / 100,
       mfi: this.calculateMFI(history) / 100,
       macd_histogram: 0.5,
+      bollinger_bandwidth: 0.5,
+      adx: 0.5,
+      trend_strength: 0.5,
+      vwap_distance: 0.5,
+      stoch_rsi: 0.5,
     };
 
-    // ML integration: blend heuristic + ML prediction
+    // ML integration: blend heuristic + ensemble ML prediction
     let mlBoost = 0;
+    let ensembleBoost = 0;
     let mlDirection = prediction.expectedDirection;
     let probability = prediction.spikeProbability;
 
@@ -524,13 +531,14 @@ class DerivLiveService {
           features.price_position, features.consecutive_moves,
           features.time_since_spike, features.momentum,
           features.sr_distance, features.mfi, features.macd_histogram,
+          features.bollinger_bandwidth, features.adx, features.trend_strength,
+          features.vwap_distance, features.stoch_rsi,
         ];
         const mlResult = mlService.predict(featArray);
         const mlTotal = mlResult.up + mlResult.down + mlResult.neutral;
         const mlUpConfidence = mlResult.up / mlTotal;
         const mlDownConfidence = mlResult.down / mlTotal;
 
-        // ML strongly disagrees with heuristic
         if (mlResult.source === 'ml') {
           const mlAgrees = (prediction.expectedDirection === 'up' && mlUpConfidence > mlDownConfidence)
             || (prediction.expectedDirection === 'down' && mlDownConfidence > mlUpConfidence);
@@ -541,7 +549,6 @@ class DerivLiveService {
             mlBoost = -Math.max(mlUpConfidence, mlDownConfidence) * 15;
           }
 
-          // ML can flip direction if very confident (>80%)
           const topMl = mlUpConfidence > mlDownConfidence ? 'up' : 'down';
           if (topMl !== prediction.expectedDirection && Math.max(mlUpConfidence, mlDownConfidence) > 0.8) {
             mlDirection = topMl;
@@ -549,9 +556,36 @@ class DerivLiveService {
           }
         }
       }
+
+      // Ensemble ML models
+      const { ensembleML } = await import('./ensembleML.js');
+      if (ensembleML.ready) {
+        const ensembleFeatArray = [
+          features.rsi, features.atr_ratio, features.volume,
+          features.price_position, features.consecutive_moves,
+          features.time_since_spike, features.momentum,
+          features.sr_distance, features.mfi, features.macd_histogram,
+          features.bollinger_bandwidth, features.adx, features.trend_strength,
+          features.vwap_distance, features.stoch_rsi,
+        ];
+        const ensembleResult = ensembleML.predict(ensembleFeatArray);
+        if (ensembleResult.source === 'ensemble_ml' && ensembleResult.confidence > 0.4) {
+          const ensembleTotal = ensembleResult.up + ensembleResult.down + ensembleResult.neutral;
+          const ensembleUpConf = ensembleResult.up / ensembleTotal;
+          const ensembleDownConf = ensembleResult.down / ensembleTotal;
+          const ensembleAgrees = (mlDirection === 'up' && ensembleUpConf > ensembleDownConf)
+            || (mlDirection === 'down' && ensembleDownConf > ensembleUpConf);
+
+          if (ensembleAgrees) {
+            ensembleBoost = Math.max(ensembleUpConf, ensembleDownConf) * 15;
+          } else {
+            ensembleBoost = -Math.max(ensembleUpConf, ensembleDownConf) * 10;
+          }
+        }
+      }
     } catch { /* ML not available, fallback to heuristic */ }
 
-    probability = Math.min(Math.max(probability + mlBoost, 0), 99);
+    probability = Math.min(Math.max(probability + mlBoost + ensembleBoost, 0), 99);
 
     const dynamicSLMultiplier = type === 'BOOM' ? 1.5 : 1.5;
     const dynamicTPMultiplier = type === 'BOOM' ? 2.5 : 2.5;
@@ -577,6 +611,7 @@ class DerivLiveService {
       upScore: Math.round(upScore),
       downScore: Math.round(downScore),
       mlBoost: Math.round(mlBoost),
+      ensembleBoost: Math.round(ensembleBoost),
       rsi: features.rsi,
       features,
     };

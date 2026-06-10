@@ -1,14 +1,22 @@
 import * as tf from '@tensorflow/tfjs';
 import { db } from '../config/firebase.js';
+import * as path from 'path';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MODELS_DIR = path.join(__dirname, '..', '..', '..', 'data', 'models', 'single');
 
 const FEATURES = [
   'rsi', 'atr_ratio', 'volume', 'price_position',
   'consecutive_moves', 'time_since_spike', 'momentum',
   'sr_distance', 'mfi', 'macd_histogram',
+  'bollinger_bandwidth', 'adx', 'trend_strength',
+  'vwap_distance', 'stoch_rsi',
 ];
 const INPUT_SIZE = FEATURES.length;
 const HIDDEN_SIZE = 16;
-const OUTPUT_SIZE = 3; // up, down, neutral
+const OUTPUT_SIZE = 3;
 
 class MLPredictionService {
   constructor() {
@@ -24,6 +32,7 @@ class MLPredictionService {
       activation: 'relu',
       kernelRegularizer: tf.regularizers.l2({ l2: 0.001 }),
     }));
+    model.add(tf.layers.batchNormalization());
     model.add(tf.layers.dropout({ rate: 0.3 }));
     model.add(tf.layers.dense({ units: 8, activation: 'relu' }));
     model.add(tf.layers.dropout({ rate: 0.2 }));
@@ -51,6 +60,11 @@ class MLPredictionService {
       signal.srDistance || 0.5,
       signal.mfi || 0.5,
       signal.macdHistogram || 0.5,
+      signal.bollingerBandwidth || 0.5,
+      signal.adx ? signal.adx / 100 : 0.5,
+      signal.trendStrength ? (signal.trendStrength + 100) / 200 : 0.5,
+      signal.vwapDistance || 0.5,
+      signal.stochRsi ? signal.stochRsi / 100 : 0.5,
     ];
   }
 
@@ -66,10 +80,8 @@ class MLPredictionService {
     for (const doc of snapshot.docs) {
       const s = doc.data();
       if (!s.features) continue;
-
       const features = this.extractFeatures({ ...s, ...s.features });
       xs.push(features);
-
       if (s.result === 'win') {
         ys.push(s.direction === 'up' ? [1, 0, 0] : [0, 1, 0]);
       } else {
@@ -119,7 +131,7 @@ class MLPredictionService {
   }
 
   predict(features) {
-    if (!this.ready) {
+    if (!this.ready || !this.model) {
       return { up: 0, down: 0, neutral: 1, source: 'heuristic' };
     }
 
@@ -138,19 +150,38 @@ class MLPredictionService {
   }
 
   async saveModel() {
-    // Modèle sauvegardé en mémoire uniquement.
-    // Se reconstruit et se ré-entraîne après chaque redémarrage.
+    if (!fs.existsSync(MODELS_DIR)) {
+      fs.mkdirSync(MODELS_DIR, { recursive: true });
+    }
+    try {
+      await this.model.save(`file://${MODELS_DIR}`);
+      console.log(`[ML] Modèle sauvegardé sur disque: ${MODELS_DIR}`);
+    } catch (err) {
+      console.error('[ML] Erreur sauvegarde modèle:', err.message);
+    }
   }
 
   async loadModel() {
+    const modelPath = path.join(MODELS_DIR, 'model.json');
+    if (fs.existsSync(modelPath)) {
+      try {
+        this.model = await tf.loadLayersModel(`file://${modelPath}`);
+        this.ready = true;
+        console.log('[ML] Modèle chargé depuis le disque');
+        return true;
+      } catch (err) {
+        console.error('[ML] Erreur chargement modèle:', err.message);
+      }
+    }
     this.buildModel();
+    return false;
   }
 
   async retrainIfNeeded() {
     const lastDoc = await db.collection('training_meta').doc('ml').get();
     const lastTrain = lastDoc.exists ? lastDoc.data().lastTrainedAt : null;
-
     const signalCount = await this.countClosedSignals();
+
     if (!lastTrain) {
       if (signalCount >= 20) {
         await this.train(30);
@@ -160,11 +191,10 @@ class MLPredictionService {
     }
 
     const daysSinceTrain = (Date.now() - new Date(lastTrain).getTime()) / (24 * 60 * 60 * 1000);
-    if (daysSinceTrain >= 1 && signalCount > (lastDoc.data().signalCount || 0) + 20) {
+    if (daysSinceTrain >= 0.5 && signalCount > (lastDoc.data().signalCount || 0) + 15) {
       await this.train(30);
       await db.collection('training_meta').doc('ml').update({
-        lastTrainedAt: new Date().toISOString(),
-        signalCount,
+        lastTrainedAt: new Date().toISOString(), signalCount,
       });
     }
   }
