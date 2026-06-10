@@ -623,21 +623,27 @@ export function predictSpike(type: IndexType, num: number) {
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
   const orderBlocks = findOrderBlocks(history);
 
-  // --- Nouveaux indicateurs techniques ---
-  const macdResult = calculateMACD(history);
-  const bbResult = calculateBollingerBands(history);
-  const ichimokuResult = calculateIchimoku(history);
-  const stochRsi = calculateStochasticRSI(history);
-  const adx = calculateADXInternal(history);
-  const trendStrength = detectTrendStrengthInternal(history);
-  const regime = analyzeRegimeInternal(history);
-  const vwap = calculateVWAP(history);
-  // ---------------------------------------
-
-  // --- Confirmation par patterns de chandeliers ---
-  const candles1m = candleMap1m.get(key) || [];
-  const candlePatterns = detectCandlestickPatterns(candles1m.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close })));
-  const patternSignal = getPatternSignal(candlePatterns);
+  // --- Nouveaux indicateurs techniques (protégés) ---
+  let macdResult: any = null, bbResult: any = null, ichimokuResult: any = null;
+  let stochRsi = 50, adx = 25, trendStrength = 0, vwap = 0;
+  let regime = { volatility: "medium" as string, market: "ranging" as string, adx: 25, recommendation: "" };
+  let patternSignal = { signal: "neutral" as string, score: 0 };
+  let candlePatterns: { name: string; signal: string; strength: number }[] = [];
+  try {
+    macdResult = calculateMACD(history);
+    bbResult = calculateBollingerBands(history);
+    ichimokuResult = calculateIchimoku(history);
+    stochRsi = calculateStochasticRSI(history);
+    adx = calculateADXInternal(history);
+    trendStrength = detectTrendStrengthInternal(history);
+    regime = analyzeRegimeInternal(history);
+    vwap = calculateVWAP(history);
+    const candles1m = candleMap1m.get(key) || [];
+    candlePatterns = detectCandlestickPatterns(candles1m.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close })));
+    patternSignal = getPatternSignal(candlePatterns);
+  } catch (e) {
+    if (!isServer) console.warn("[Deriv] Erreur indicateurs techniques:", e);
+  }
   // -----------------------------------------------
 
   const upScore = scoreSignal(currentPrice, nearestSupport?.price ?? null, nearestSupport?.strength ?? 0, history, true, rsiVal, market);
