@@ -65,24 +65,36 @@ export default function Header() {
           </button>
         </div>
       </div>
+      {/* Overlay */}
       {open && (
-        <div className="md:hidden border-t border-border bg-surface/95 backdrop-blur-xl">
-          <div className="px-4 py-4 space-y-3">
-            {NAV_ITEMS.map((item) => (
-              <a key={item.href} href={item.href} className="block text-sm text-text-secondary hover:text-text py-2">{item.label}</a>
-            ))}
-            <hr className="border-border" />
-            {user ? (
-              <button onClick={handleLogout} className="block w-full text-left text-sm text-danger hover:text-danger/80 py-2">Déconnexion</button>
-            ) : (
-              <>
-                <a href="/connexion" className="block text-sm text-text-secondary hover:text-text py-2">Connexion</a>
-                <a href="/inscription" className="block text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-lg font-medium text-center">S&apos;inscrire</a>
-              </>
-            )}
-          </div>
+        <div className="fixed inset-0 z-40 md:hidden" onClick={() => setOpen(false)}>
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
         </div>
       )}
+
+      {/* Sidebar */}
+      <div className={`fixed top-0 right-0 z-50 h-full w-72 bg-surface/95 backdrop-blur-xl border-l border-border transform transition-transform duration-300 ease-in-out md:hidden ${open ? "translate-x-0" : "translate-x-full"}`}>
+        <div className="flex items-center justify-between px-4 h-16 border-b border-border">
+          <span className="font-bold">Menu</span>
+          <button onClick={() => setOpen(false)} className="text-text p-2">
+            <X size={24} />
+          </button>
+        </div>
+        <div className="px-4 py-4 space-y-3">
+          {NAV_ITEMS.map((item) => (
+            <a key={item.href} href={item.href} onClick={() => setOpen(false)} className="block text-sm text-text-secondary hover:text-text py-2">{item.label}</a>
+          ))}
+          <hr className="border-border" />
+          {user ? (
+            <button onClick={() => { handleLogout(); setOpen(false); }} className="block w-full text-left text-sm text-danger hover:text-danger/80 py-2">Déconnexion</button>
+          ) : (
+            <>
+              <a href="/connexion" onClick={() => setOpen(false)} className="block text-sm text-text-secondary hover:text-text py-2">Connexion</a>
+              <a href="/inscription" onClick={() => setOpen(false)} className="block text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-lg font-medium text-center">S&apos;inscrire</a>
+            </>
+          )}
+        </div>
+      </div>
     </header>
   );
 }
