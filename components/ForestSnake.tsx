@@ -157,12 +157,6 @@ export default function ForestSnake() {
         setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
       }
 
-      // Tree collision
-      if (t[ny][nx] === "T") {
-        alive.current = false; msg.current = "💀 Collision avec un arbre !"; msgTimer.current = tickC.current;
-        setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
-      }
-
       // Self collision
       if (p.some(c => c.x === nx && c.y === ny)) {
         alive.current = false; msg.current = "💀 Tu t'es mordu la queue !"; msgTimer.current = tickC.current;
@@ -199,6 +193,7 @@ export default function ForestSnake() {
           cryptoEaten = true;
           p.push({ ...p[p.length - 1] });
           p.push({ ...p[p.length - 1] });
+          p.push({ ...p[p.length - 1] });
           setScore(s => s + 5);
           const loc = t[ny][nx] === "T" ? "un arbre 🌲" : "la rivière 🌊";
           msg.current = `🪙 ${cr.emoji} trouvé dans ${loc} ! +5 pts`;
@@ -224,23 +219,22 @@ export default function ForestSnake() {
         const bh = b.body[0];
         const bnx = bh.x + DX[b.dir], bny = bh.y + DY[b.dir];
 
-        // Wall/tree block
-        if (bnx < 0 || bnx >= COLS || bny < 0 || bny >= ROWS || t[bny][bnx] !== ".") {
+        // Wall block for AI
+        if (bnx < 0 || bnx >= COLS || bny < 0 || bny >= ROWS) {
           const dirs: Dir[] = ["U", "D", "L", "R"];
-          let moved = false;
           for (const d of dirs) {
             if (d === OPP[b.dir]) continue;
             const nnx = bh.x + DX[d], nny = bh.y + DY[d];
-            if (nnx >= 0 && nnx < COLS && nny >= 0 && nny < ROWS && t[nny][nnx] === ".") {
-              b.dir = d; moved = true; break;
+            if (nnx >= 0 && nnx < COLS && nny >= 0 && nny < ROWS) {
+              b.dir = d; break;
             }
           }
-          if (!moved) continue;
+          continue;
         }
 
         const bnx2 = bh.x + DX[b.dir], bny2 = bh.y + DY[b.dir];
         // Re-check bounds
-        if (bnx2 < 0 || bnx2 >= COLS || bny2 < 0 || bny2 >= ROWS || t[bny2][bnx2] !== ".") continue;
+        if (bnx2 < 0 || bnx2 >= COLS || bny2 < 0 || bny2 >= ROWS) continue;
 
         // AI vs AI
         let blocked = false;
