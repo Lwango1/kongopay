@@ -1,6 +1,5 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import MarioCryptoTreasure from "@/components/MarioCryptoTreasure";
 
 const GUIDES = [
   { title: "Qu'est-ce que la Crypto ?", desc: "Comprenez les bases de la blockchain, du Bitcoin et des altcoins." },
@@ -73,7 +72,6 @@ export default function ApprendrePage() {
           </div>
         </section>
 
-        <MarioCryptoTreasure />
       </main>
       <Footer />
     </>
