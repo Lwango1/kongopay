@@ -251,13 +251,35 @@ export default function ForestSnake() {
       // Move AI
       for (const b of bots.current) {
         if (!b.alive) continue;
-        // Random direction change
-        if (Math.random() < 0.12) {
+
+        // AI behavior: chase smaller snakes, flee bigger ones
+        const bh = b.body[0];
+        let targetDir: Dir | null = null;
+        for (const ob of bots.current) {
+          if (ob.id === b.id || !ob.alive) continue;
+          const dist = Math.abs(ob.body[0].x - bh.x) + Math.abs(ob.body[0].y - bh.y);
+          if (dist > 6) continue;
+          if (b.body.length > ob.body.length + 1) {
+            // Chase smaller snake
+            if (ob.body[0].x < bh.x && b.dir !== "L") targetDir = "L";
+            else if (ob.body[0].x > bh.x && b.dir !== "R") targetDir = "R";
+            else if (ob.body[0].y < bh.y && b.dir !== "U") targetDir = "U";
+            else if (ob.body[0].y > bh.y && b.dir !== "D") targetDir = "D";
+          } else if (ob.body.length > b.body.length + 1) {
+            // Flee bigger snake
+            if (ob.body[0].x < bh.x && b.dir !== "R") targetDir = "R";
+            else if (ob.body[0].x > bh.x && b.dir !== "L") targetDir = "L";
+            else if (ob.body[0].y < bh.y && b.dir !== "D") targetDir = "D";
+            else if (ob.body[0].y > bh.y && b.dir !== "U") targetDir = "U";
+          }
+        }
+        if (targetDir && Math.random() < 0.85) b.dir = targetDir;
+        else if (Math.random() < 0.10) {
           const dirs: Dir[] = ["U", "D", "L", "R"];
           const nd = dirs[rng(4)];
           if (nd !== OPP[b.dir]) b.dir = nd;
         }
-        const bh = b.body[0];
+
         const bnx = bh.x + DX[b.dir], bny = bh.y + DY[b.dir];
 
         // Wall block for AI
@@ -292,7 +314,7 @@ export default function ForestSnake() {
               if (cryptos.current.length > 0) spawnBotIfNeeded();
             } else if (ob.body.length > b.body.length + 1) {
               b.alive = false;
-              ob.body.push(...ob.body);
+              ob.body.push(...b.body);
               msg.current = `🐍 ${ob.name} a mangé ${b.name} !`;
               msgTimer.current = tickC.current;
               if (cryptos.current.length > 0) spawnBotIfNeeded();
