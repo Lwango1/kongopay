@@ -65,11 +65,42 @@ export default function ForestSnake() {
   const msgTimer = useRef(0);
   const tickC = useRef(0);
   const cryptoEatenCount = useRef(0);
+  const nextBotId = useRef(10);
+
+  const spawnBotIfNeeded = () => {
+    if (cryptos.current.length === 0) return;
+    const t = terrain.current;
+    const used: Seg[] = [...pBody.current];
+    bots.current.filter(b => b.alive).forEach(b => used.push(...b.body));
+    for (let a = 0; a < 30; a++) {
+      const h = grassCell(t); if (!h) break;
+      const dir = (["U", "D", "L", "R"] as Dir[])[rng(4)];
+      const len = 3 + rng(4);
+      const body: Seg[] = [{ x: h.x, y: h.y }];
+      let ok = true;
+      for (let j = 1; j < len; j++) {
+        const px = body[j - 1].x - DX[dir], py = body[j - 1].y - DY[dir];
+        if (px < 0 || px >= COLS || py < 0 || py >= ROWS) { ok = false; break; }
+        if (used.some(u => u.x === px && u.y === py)) { ok = false; break; }
+        body.push({ x: px, y: py });
+      }
+      if (ok) {
+        const id = nextBotId.current++;
+        const color = BOT_COLORS[rng(BOT_COLORS.length)];
+        const name = BOT_NAMES[rng(BOT_NAMES.length)];
+        bots.current.push({ id, body, dir, alive: true, color, name });
+        msg.current = `🐍 Nouveau serpent apparait : ${name} !`;
+        msgTimer.current = tickC.current;
+        break;
+      }
+    }
+  };
 
   // Force render counter
   const [tick, setTick] = useState(0);
   const [started, setStarted] = useState(false);
   const [over, setOver] = useState(false);
+  const [won, setWon] = useState(false);
   const [score, setScore] = useState(0);
   const [hi, setHi] = useState(0);
 
@@ -118,6 +149,7 @@ export default function ForestSnake() {
 
     setScore(0);
     setOver(false);
+    setWon(false);
     setStarted(true);
     rerender();
   };
@@ -140,9 +172,9 @@ export default function ForestSnake() {
 
   // Game loop
   useEffect(() => {
-    if (!started || over) return;
+    if (!started || over || won) return;
     const interval = setInterval(() => {
-      if (!alive.current) return;
+      if (!alive.current || won) return;
       tickC.current++;
 
       const t = terrain.current;
@@ -178,6 +210,7 @@ export default function ForestSnake() {
             msg.current = `🐍 ${b.name} mangé ! +${15 + bonus} pts`;
             msgTimer.current = tickC.current;
             aiEatenThisTick = true;
+            if (cryptos.current.length > 0) spawnBotIfNeeded();
           } else {
             alive.current = false; msg.current = `💀 ${b.name} t'a mangé !`; msgTimer.current = tickC.current;
             setOver(true); setHi(h => Math.max(h, score)); rerender(); return;
@@ -199,7 +232,14 @@ export default function ForestSnake() {
           const loc = t[ny][nx] === "T" ? "un arbre 🌲" : "la rivière 🌊";
           msg.current = `🪙 ${cr.emoji} trouvé dans ${loc} ! +5 pts`;
           msgTimer.current = tickC.current;
-          const np = specialCell(t); if (np) cryptos.current.push({ x: np.x, y: np.y, emoji: COINS[rng(COINS.length)] });
+
+          // Level complete if all cryptos collected
+          if (cryptos.current.length === 0) {
+            setWon(true);
+            setHi(h => Math.max(h, score));
+            msg.current = "🎉 Niveau terminé ! Toutes les cryptos collectées !";
+            msgTimer.current = tickC.current;
+          }
           break;
         }
       }
@@ -237,20 +277,28 @@ export default function ForestSnake() {
         // Re-check bounds
         if (bnx2 < 0 || bnx2 >= COLS || bny2 < 0 || bny2 >= ROWS) continue;
 
-        // AI vs AI
+        // AI vs AI - bigger eats smaller, no block
+        let aiAte = false;
         let blocked = false;
         for (const ob of bots.current) {
           if (ob.id === b.id || !ob.alive) continue;
           if (ob.body.some(c => c.x === bnx2 && c.y === bny2)) {
             if (b.body.length > ob.body.length + 1) {
-              // Bigger AI eats smaller AI
               ob.alive = false;
               b.body.push(...ob.body);
+              aiAte = true;
+              msg.current = `🐍 ${b.name} a mangé ${ob.name} !`;
+              msgTimer.current = tickC.current;
+              if (cryptos.current.length > 0) spawnBotIfNeeded();
             } else if (ob.body.length > b.body.length + 1) {
               b.alive = false;
-              ob.body.push(...b.body);
-            }
-            blocked = true; break;
+              ob.body.push(...ob.body);
+              msg.current = `🐍 ${ob.name} a mangé ${b.name} !`;
+              msgTimer.current = tickC.current;
+              if (cryptos.current.length > 0) spawnBotIfNeeded();
+              blocked = true;
+            } else { blocked = true; }
+            break;
           }
         }
         if (blocked) continue;
@@ -265,7 +313,7 @@ export default function ForestSnake() {
         }
 
         b.body.unshift({ x: bnx2, y: bny2 });
-        b.body.pop();
+        if (!aiAte) b.body.pop();
       }
 
       // Survival score
@@ -273,7 +321,7 @@ export default function ForestSnake() {
       rerender();
     }, TICK);
     return () => clearInterval(interval);
-  }, [started, over]);
+  }, [started, over, won]);
 
   const msgText = msg.current && tickC.current - msgTimer.current < 30 ? msg.current : "";
 
@@ -288,8 +336,7 @@ export default function ForestSnake() {
       <div className="max-w-3xl mx-auto text-center">
         <h2 className="text-2xl font-bold mb-1">🐍 Forêt des Cryptos</h2>
         <p className="text-text-secondary text-xs mb-3 max-w-md mx-auto">
-          Flèches ←↑↓→ pour bouger. Mange les cryptos 🪙 dans les arbres 🌲 et rivières 🌊.
-          Mange les serpents plus petits que toi, fuis les plus gros !
+          Flèches ←↑↓→. Collecte toutes les 🪙 cryptos pour gagner. Mange les petits serpents, fuis les gros !
         </p>
 
         <div className="flex items-center justify-center gap-2 mb-3 flex-wrap text-xs">
@@ -335,7 +382,7 @@ export default function ForestSnake() {
               </div>
             </div>
           )}
-          {over && (
+          {over && !won && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-20">
               <div className="text-center p-6">
                 <p className="text-4xl mb-1">💀</p>
@@ -343,6 +390,17 @@ export default function ForestSnake() {
                 <p className="text-xs text-text-secondary mb-1">Score: {score}</p>
                 {msgText && <p className="text-[10px] text-text-muted mb-3">{msgText}</p>}
                 <button onClick={startGame} className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">🔄 Rejouer</button>
+              </div>
+            </div>
+          )}
+          {won && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/85 z-20">
+              <div className="text-center p-6">
+                <p className="text-4xl mb-1">🏆</p>
+                <p className="text-base font-bold text-success mb-1">Niveau terminé !</p>
+                <p className="text-xs text-text-secondary mb-1">Score: {score} | 🪙 {cryptoEatenCount.current} cryptos trouvées</p>
+                <p className="text-[10px] text-text-muted mb-3">Toutes les cryptos de la forêt ont été collectées !</p>
+                <button onClick={startGame} className="px-5 py-2 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">🔄 Nouvelle partie</button>
               </div>
             </div>
           )}
