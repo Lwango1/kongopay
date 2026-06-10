@@ -64,6 +64,7 @@ export default function ForestSnake() {
   const msg = useRef("");
   const msgTimer = useRef(0);
   const tickC = useRef(0);
+  const cryptoEatenCount = useRef(0);
 
   // Force render counter
   const [tick, setTick] = useState(0);
@@ -83,6 +84,7 @@ export default function ForestSnake() {
     msg.current = "";
     msgTimer.current = 0;
     tickC.current = 0;
+    cryptoEatenCount.current = 0;
     const used = [...pBody.current];
 
     const newBots: Bot[] = [];
@@ -191,8 +193,7 @@ export default function ForestSnake() {
         if (cr.x === nx && cr.y === ny) {
           cryptos.current.splice(i, 1);
           cryptoEaten = true;
-          p.push({ ...p[p.length - 1] });
-          p.push({ ...p[p.length - 1] });
+          cryptoEatenCount.current++;
           p.push({ ...p[p.length - 1] });
           setScore(s => s + 5);
           const loc = t[ny][nx] === "T" ? "un arbre 🌲" : "la rivière 🌊";
@@ -303,6 +304,11 @@ export default function ForestSnake() {
           <div className="px-3 py-1 rounded-lg bg-surface border border-border">
             <span className="text-text-muted">🐍 Taille </span>
             <span className="font-bold" style={{ color: "#22c55e" }}>{pBody.current.length}</span>
+          </div>
+          <div className="px-3 py-1 rounded-lg bg-surface border border-border">
+            <span className="text-text-muted">🪙 </span>
+            <span className="font-bold text-warning">{cryptoEatenCount.current}</span>
+            <span className="text-text-muted text-[10px] ml-0.5">trouvées</span>
           </div>
           {bots.current.filter(b => b.alive).map(b => (
             <div key={b.id} className="px-2 py-1 rounded bg-surface border border-border text-[10px] flex items-center gap-1">
