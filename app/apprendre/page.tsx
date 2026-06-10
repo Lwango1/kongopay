@@ -1,6 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
-import CryptoSnake from "@/components/CryptoSnake";
+import ForestSnake from "@/components/ForestSnake";
 
 const GUIDES = [
   { title: "Qu'est-ce que la Crypto ?", desc: "Comprenez les bases de la blockchain, du Bitcoin et des altcoins." },
@@ -73,7 +73,7 @@ export default function ApprendrePage() {
           </div>
         </section>
 
-        <CryptoSnake />
+        <ForestSnake />
 
       </main>
       <Footer />
