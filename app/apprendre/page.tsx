@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import CryptoTreasureGame from "@/components/CryptoTreasureGame";
 
 const GUIDES = [
   { title: "Qu'est-ce que la Crypto ?", desc: "Comprenez les bases de la blockchain, du Bitcoin et des altcoins." },
@@ -20,7 +21,7 @@ export default function ApprendrePage() {
           <p className="text-text-secondary text-center mb-12 max-w-2xl mx-auto">
             Des ressources éducatives pour débuter et progresser dans l&apos;univers des cryptomonnaies.
           </p>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-16">
             {GUIDES.map((g) => (
               <div key={g.title} className="rounded-xl border border-border bg-surface p-6 hover:border-primary/30 transition-colors cursor-pointer">
                 <h3 className="font-semibold mb-2">{g.title}</h3>
@@ -29,6 +30,7 @@ export default function ApprendrePage() {
             ))}
           </div>
         </section>
+        <CryptoTreasureGame />
       </main>
       <Footer />
     </>
