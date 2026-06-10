@@ -252,29 +252,26 @@ export default function ForestSnake() {
       for (const b of bots.current) {
         if (!b.alive) continue;
 
-        // AI behavior: chase smaller snakes, flee bigger ones
+        // AI behavior: chase player if bigger, flee if smaller
         const bh = b.body[0];
+        const pHead = p[0];
+        const distToPlayer = Math.abs(pHead.x - bh.x) + Math.abs(pHead.y - bh.y);
         let targetDir: Dir | null = null;
-        for (const ob of bots.current) {
-          if (ob.id === b.id || !ob.alive) continue;
-          const dist = Math.abs(ob.body[0].x - bh.x) + Math.abs(ob.body[0].y - bh.y);
-          if (dist > 6) continue;
-          if (b.body.length > ob.body.length + 1) {
-            // Chase smaller snake
-            if (ob.body[0].x < bh.x && b.dir !== "L") targetDir = "L";
-            else if (ob.body[0].x > bh.x && b.dir !== "R") targetDir = "R";
-            else if (ob.body[0].y < bh.y && b.dir !== "U") targetDir = "U";
-            else if (ob.body[0].y > bh.y && b.dir !== "D") targetDir = "D";
-          } else if (ob.body.length > b.body.length + 1) {
-            // Flee bigger snake
-            if (ob.body[0].x < bh.x && b.dir !== "R") targetDir = "R";
-            else if (ob.body[0].x > bh.x && b.dir !== "L") targetDir = "L";
-            else if (ob.body[0].y < bh.y && b.dir !== "D") targetDir = "D";
-            else if (ob.body[0].y > bh.y && b.dir !== "U") targetDir = "U";
+        if (distToPlayer <= 8) {
+          if (b.body.length > p.length + 1) {
+            if (pHead.x < bh.x && b.dir !== "L") targetDir = "L";
+            else if (pHead.x > bh.x && b.dir !== "R") targetDir = "R";
+            else if (pHead.y < bh.y && b.dir !== "U") targetDir = "U";
+            else if (pHead.y > bh.y && b.dir !== "D") targetDir = "D";
+          } else {
+            if (pHead.x < bh.x && b.dir !== "R") targetDir = "R";
+            else if (pHead.x > bh.x && b.dir !== "L") targetDir = "L";
+            else if (pHead.y < bh.y && b.dir !== "D") targetDir = "D";
+            else if (pHead.y > bh.y && b.dir !== "U") targetDir = "U";
           }
         }
         if (targetDir && Math.random() < 0.85) b.dir = targetDir;
-        else if (Math.random() < 0.10) {
+        else if (Math.random() < 0.12) {
           const dirs: Dir[] = ["U", "D", "L", "R"];
           const nd = dirs[rng(4)];
           if (nd !== OPP[b.dir]) b.dir = nd;
@@ -296,31 +293,14 @@ export default function ForestSnake() {
         }
 
         const bnx2 = bh.x + DX[b.dir], bny2 = bh.y + DY[b.dir];
-        // Re-check bounds
         if (bnx2 < 0 || bnx2 >= COLS || bny2 < 0 || bny2 >= ROWS) continue;
 
-        // AI vs AI - bigger eats smaller, no block
-        let aiAte = false;
+        // AI vs AI - just block, no eating
         let blocked = false;
         for (const ob of bots.current) {
           if (ob.id === b.id || !ob.alive) continue;
           if (ob.body.some(c => c.x === bnx2 && c.y === bny2)) {
-            if (b.body.length > ob.body.length + 1) {
-              ob.alive = false;
-              b.body.push(...ob.body);
-              aiAte = true;
-              msg.current = `🐍 ${b.name} a mangé ${ob.name} !`;
-              msgTimer.current = tickC.current;
-              if (cryptos.current.length > 0) spawnBotIfNeeded();
-            } else if (ob.body.length > b.body.length + 1) {
-              b.alive = false;
-              ob.body.push(...b.body);
-              msg.current = `🐍 ${ob.name} a mangé ${b.name} !`;
-              msgTimer.current = tickC.current;
-              if (cryptos.current.length > 0) spawnBotIfNeeded();
-              blocked = true;
-            } else { blocked = true; }
-            break;
+            blocked = true; break;
           }
         }
         if (blocked) continue;
@@ -335,7 +315,7 @@ export default function ForestSnake() {
         }
 
         b.body.unshift({ x: bnx2, y: bny2 });
-        if (!aiAte) b.body.pop();
+        b.body.pop();
       }
 
       // Survival score
