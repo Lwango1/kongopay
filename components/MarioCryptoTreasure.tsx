@@ -185,7 +185,7 @@ export default function MarioCryptoTreasure() {
 
   return (
     <section className="py-16 px-4 border-t border-border">
-      <div className="max-4xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold flex items-center justify-center gap-3 mb-2">
             🏃 Mario Crypto Treasure

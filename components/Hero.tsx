@@ -28,7 +28,7 @@ export default function Hero() {
           <a href="/inscription" className="bg-primary hover:bg-primary/90 text-white px-8 py-3 rounded-xl font-semibold text-lg transition-all hover:scale-105">
             Créer un compte gratuit
           </a>
-          <a href="/marches" className="border border-border hover:bg-surface text-text px-8 py-3 rounded-xl font-semibold text-lg transition-all">
+          <a href="/" className="border border-border hover:bg-surface text-text px-8 py-3 rounded-xl font-semibold text-lg transition-all">
             Voir les marchés
           </a>
         </div>

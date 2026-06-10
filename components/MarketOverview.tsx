@@ -46,7 +46,7 @@ export default function MarketOverview() {
             <h2 className="text-3xl md:text-4xl font-bold">Marchés en temps réel</h2>
             <p className="text-text-secondary mt-2">Cryptos, Forex, Matières Premières — Données multi-sources</p>
           </div>
-          <a href="/marches" className="hidden sm:block text-sm text-primary hover:text-primary-light transition-colors">Voir tous les marchés →</a>
+          <a href="/" className="hidden sm:block text-sm text-primary hover:text-primary-light transition-colors">Voir les signaux →</a>
         </div>
         <div className="flex gap-2 mb-6 flex-wrap">
           {TABS.map((t) => (
