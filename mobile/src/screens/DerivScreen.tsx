@@ -17,6 +17,8 @@ import Card from '../components/ui/Card';
 import { fetchDerivState, fetchSpikePrediction, fetchMarketScan, INDICES } from '../services/deriv';
 import type { DerivState, SpikeMap, MarketScanResult, MarketOpportunity } from '../services/deriv';
 import { registerForPushNotifications, onMessageReceived } from '../services/notifications';
+import { addToHistory, getTodayHistory } from '../services/signalHistory';
+import type { MobileHistoryEntry } from '../services/signalHistory';
 
 const chartWidth = Dimensions.get('window').width - 48;
 
@@ -52,6 +54,8 @@ export default function DerivScreen() {
   const [previousImminent, setPreviousImminent] = useState<string[]>([]);
   const previousImminentRef = useRef(previousImminent);
   previousImminentRef.current = previousImminent;
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyData, setHistoryData] = useState<MobileHistoryEntry[]>([]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -86,6 +90,21 @@ export default function DerivScreen() {
         const newAlerts = imminentKeys.filter(k => !previousImminentRef.current.includes(k));
         if (newAlerts.length > 0) {
           Vibration.vibrate(500);
+
+          for (const opp of scanResult.opportunities) {
+            if (newAlerts.includes(`${opp.type}_${opp.number}`)) {
+              addToHistory({
+                key: `${opp.type}_${opp.number}`,
+                label: opp.label,
+                direction: opp.expectedDirection,
+                probability: opp.spikeProbability,
+                magnitude: opp.estimatedMagnitude,
+                detectedAt: Date.now(),
+                expiredAt: Date.now() + 300000,
+              });
+            }
+          }
+
           const newOpp = scanResult.opportunities.find(o =>
             newAlerts.includes(`${o.type}_${o.number}`)
           );
@@ -175,9 +194,45 @@ export default function DerivScreen() {
                 Détail par indice
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'history' && styles.tabActive]}
+              onPress={() => {
+                setActiveTab('history');
+                getTodayHistory().then(setHistoryData);
+              }}
+            >
+              <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>
+                Historique
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          {activeTab === 'scan' ? (
+          {activeTab === 'history' ? (
+            <View style={styles.historyContainer}>
+              <Text style={styles.historyTitle}>Historique du jour</Text>
+              {historyData.length === 0 ? (
+                <Text style={styles.historyEmpty}>Aucun signal enregistré aujourd'hui</Text>
+              ) : (
+                historyData.sort((a, b) => b.detectedAt - a.detectedAt).map((e, i) => {
+                  const t = new Date(e.detectedAt);
+                  const timeStr = `${t.getHours().toString().padStart(2, '0')}:${t.getMinutes().toString().padStart(2, '0')}:${t.getSeconds().toString().padStart(2, '0')}`;
+                  const isUp = e.direction === 'up';
+                  return (
+                    <View key={i} style={styles.historyRow}>
+                      <View style={styles.historyRowLeft}>
+                        <Text style={styles.historyTime}>{timeStr}</Text>
+                        <Text style={styles.historyLabel}>{e.label}</Text>
+                        <Text style={[styles.historyDir, { color: isUp ? COLORS.success : COLORS.danger }]}>
+                          {isUp ? '↑' : '↓'} {e.probability}%
+                        </Text>
+                      </View>
+                      <Text style={styles.historyMag}>{e.magnitude}</Text>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          ) : activeTab === 'scan' ? (
             <>
               {imminentOpps.length > 0 && (
                 <View style={styles.imminentSection}>
@@ -507,4 +562,19 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { color: COLORS.textSecondary, fontSize: 12, flex: 1 },
+
+  historyContainer: { paddingVertical: 8 },
+  historyTitle: { color: COLORS.text, fontSize: 16, fontWeight: '700', marginBottom: 12 },
+  historyEmpty: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center', paddingVertical: 40 },
+  historyRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 10, paddingHorizontal: 12,
+    backgroundColor: COLORS.surface, borderRadius: 10,
+    marginBottom: 6, borderWidth: 1, borderColor: COLORS.border,
+  },
+  historyRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  historyTime: { color: COLORS.textMuted, fontSize: 11, fontVariant: ['tabular-nums'] },
+  historyLabel: { color: COLORS.text, fontSize: 13, fontWeight: '600' },
+  historyDir: { fontSize: 12, fontWeight: '700' },
+  historyMag: { color: COLORS.textMuted, fontSize: 11 },
 });
