@@ -3,7 +3,7 @@
 
 export type IndexType = "BOOM" | "CRASH";
 
-let touchModeEnabled = false;
+let touchModeEnabled = true;
 
 export function setTouchMode(v: boolean) { touchModeEnabled = v; }
 export function getTouchMode() { return touchModeEnabled; }
