@@ -822,20 +822,29 @@ export function predictSpike(type: IndexType, num: number) {
   if (probability >= 85) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
   else if (probability >= 80) signal = isBoom ? "BUY" : "SELL";
 
-  const entryLevel = isBoom
-    ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
-    : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
+  const predictive = isApproaching && !levelTouched;
+  let entryLevel: number;
+  if (predictive) {
+    entryLevel = isBoom
+      ? currentPrice * 0.998
+      : currentPrice * 1.002;
+  } else {
+    entryLevel = isBoom
+      ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
+      : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
+  }
 
   const slBuffer = vol * slMultiplier;
   const tpBuffer = vol * tpMultiplier;
 
   const stopLoss = isBoom
-    ? Math.min(entryLevel * 0.996, entryLevel - slBuffer)
-    : Math.max(entryLevel * 1.004, entryLevel + slBuffer);
+    ? (predictive ? entryLevel * 0.998 : Math.min(entryLevel * 0.996, entryLevel - slBuffer))
+    : (predictive ? entryLevel * 1.002 : Math.max(entryLevel * 1.004, entryLevel + slBuffer));
 
+  const tpTarget = predictive ? vol * 1.2 : vol * 0.8;
   const takeProfit = isBoom
-    ? Math.max(entryLevel + tpBuffer, currentPrice + vol * 0.8)
-    : Math.min(entryLevel - tpBuffer, currentPrice - vol * 0.8);
+    ? Math.max(entryLevel + tpTarget, currentPrice + tpTarget)
+    : Math.min(entryLevel - tpTarget, currentPrice - tpTarget);
 
   let isConfirmed = false;
   let confirmationPrice: number | null = null;

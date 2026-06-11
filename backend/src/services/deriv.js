@@ -397,17 +397,26 @@ class DerivLiveService {
     const recentRange = currentPrice > 0 ? (recentHigh - recentLow) / currentPrice : 0.005;
     const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * (recentRange / 0.005) * 100).toFixed(1);
     const isUp = expectedDirection === 'up';
-    const entryPrice = isUp
-      ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
-      : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
+    const predictive = isApproaching;
+    let entryPrice;
+    if (predictive) {
+      entryPrice = isUp
+        ? currentPrice * 0.998
+        : currentPrice * 1.002;
+    } else {
+      entryPrice = isUp
+        ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
+        : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
+    }
     const slBuffer = Math.max(atr * 0.6, currentPrice * 0.003);
     const tpBuffer = Math.max(atr * 1.8, currentPrice * 0.008);
     const stopLoss = isUp
-      ? Math.min(entryPrice * 0.996, entryPrice - slBuffer)
-      : Math.max(entryPrice * 1.004, entryPrice + slBuffer);
+      ? (predictive ? entryPrice * 0.998 : Math.min(entryPrice * 0.996, entryPrice - slBuffer))
+      : (predictive ? entryPrice * 1.002 : Math.max(entryPrice * 1.004, entryPrice + slBuffer));
+    const tpTarget = predictive ? atr * 1.2 : atr * 0.8;
     const takeProfit = isUp
-      ? Math.max(entryPrice + tpBuffer, currentPrice + atr * 0.8)
-      : Math.min(entryPrice - tpBuffer, currentPrice - atr * 0.8);
+      ? Math.max(entryPrice + tpTarget, currentPrice + tpTarget)
+      : Math.min(entryPrice - tpTarget, currentPrice - tpTarget);
 
     const signal = isUp ? (spikeProbability >= 85 ? 'STRONG_BUY' : spikeProbability >= 75 ? 'BUY' : 'WATCH') : (spikeProbability >= 85 ? 'STRONG_SELL' : spikeProbability >= 75 ? 'SELL' : 'WATCH');
 
