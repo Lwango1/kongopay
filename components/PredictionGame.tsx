@@ -1,16 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
-  Brain, TrendingUp, TrendingDown, Flame, Droplet, AlertTriangle, BarChart3,
+  Brain, Flame, Droplet, AlertTriangle, BarChart3,
   ExternalLink, Zap, Wifi, WifiOff,
 } from "lucide-react";
-import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
-import type { Candlestick, Signal, IndexType } from "@/lib/deriv";
-import { initDerivClient, getDerivState, predictSpike, getCandlesticks, setTouchMode, getTouchMode } from "@/lib/deriv";
-import { useAuth } from "@/context/AuthContext";
-import { apiFetch } from "@/lib/api";
-
+import type { Signal, IndexType } from "@/lib/deriv";
+import { initDerivClient, getDerivState, predictSpike, setTouchMode, getTouchMode } from "@/lib/deriv";
 interface SRLevel {
   price: number;
   strength: number;
@@ -52,30 +48,14 @@ const INDICES: IndexInfo[] = [
   { type: "CRASH", number: 1000, icon: Droplet, color: "#be123c", label: "Crash 1000", symbol: "CRASH1000" },
 ];
 
-const DERIV_URL = "https://app.deriv.com/trading";
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
 const MIN_PROBABILITY = 80;
 
 export default function PredictionGame() {
-  const { user } = useAuth();
   const [connected, setConnected] = useState(false);
   const [activeSignals, setActiveSignals] = useState<DetectedSignal[]>([]);
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
-  const [candles, setCandles] = useState<Candlestick[]>([]);
-  const [isPremium, setIsPremium] = useState(false);
-  const [signalUsage, setSignalUsage] = useState({ used: 0, limit: 3, remaining: 3 });
   const [touchMode, setTouchModeState] = useState(getTouchMode());
-
-  const chartRef = useRef<HTMLDivElement>(null);
-  const chartApiRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick", any> | null>(null);
-  const prevKeysRef = useRef<string>("");
-
-  useEffect(() => {
-    if (!user) return;
-    apiFetch<any>("/subscription/status").then(d => setIsPremium(d.isPremium)).catch(() => {});
-    apiFetch<any>("/subscription/signal-usage").then(d => setSignalUsage(d)).catch(() => {});
-  }, [user]);
 
   const selectedIdx = selectedSignal
     ? INDICES.find(i => `${i.type}_${i.number}` === selectedSignal)
@@ -162,51 +142,8 @@ export default function PredictionGame() {
     return () => clearInterval(interval);
   }, [scanAll]);
 
-  useEffect(() => {
-    if (!selectedSignal) return;
-    const parts = selectedSignal.split("_");
-    const type = parts[0] as IndexType;
-    const num = parseInt(parts[1]);
-    const interval = setInterval(() => {
-      const cd = getCandlesticks(type, num);
-      setCandles([...cd]);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [selectedSignal]);
 
-  useEffect(() => {
-    if (!chartRef.current) return;
-    if (chartApiRef.current) {
-      chartApiRef.current.applyOptions({ width: chartRef.current.clientWidth, height: 260 });
-      return;
-    }
-    const chart = createChart(chartRef.current, {
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#a0aec0" },
-      grid: { vertLines: { color: "#2d3748" }, horzLines: { color: "#2d3748" } },
-      width: chartRef.current.clientWidth, height: 260,
-      crosshair: { mode: CrosshairMode.Normal },
-      timeScale: { borderColor: "#2d3748", timeVisible: true, secondsVisible: false },
-      rightPriceScale: { borderColor: "#2d3748" },
-    });
-    const series = chart.addSeries(CandlestickSeries, {
-      upColor: "#22c55e", downColor: "#ef4444",
-      borderUpColor: "#22c55e", borderDownColor: "#ef4444",
-      wickUpColor: "#22c55e", wickDownColor: "#ef4444",
-    });
-    chartApiRef.current = chart;
-    seriesRef.current = series;
-    const handleResize = () => { if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth }); };
-    window.addEventListener("resize", handleResize);
-    return () => { window.removeEventListener("resize", handleResize); chart.remove(); chartApiRef.current = null; seriesRef.current = null; };
-  }, [selectedSignal]);
 
-  useEffect(() => {
-    if (seriesRef.current && candles.length > 0) {
-      seriesRef.current.setData(candles.map(c => ({ time: c.time as any, open: c.open, high: c.high, low: c.low, close: c.close })));
-    }
-  }, [candles]);
-
-  const hasAccess = isPremium || (user && signalUsage.remaining > 0) || false;
   const signal = activeSignals.find(s => s.key === selectedSignal);
 
   return (
@@ -264,8 +201,8 @@ export default function PredictionGame() {
         )}
 
         {activeSignals.length > 0 && (
-          <div className="grid lg:grid-cols-4 gap-6">
-            <div className="lg:col-span-1 space-y-2">
+          <div className="grid lg:grid-cols-5 gap-6">
+            <div className="lg:col-span-2 space-y-2">
               {activeSignals.map((s) => {
                 const isSel = s.key === selectedSignal;
                 const timeLeft = Math.max(0, SIGNAL_EXPIRY_MS - (Date.now() - s.detectedAt));
@@ -288,23 +225,6 @@ export default function PredictionGame() {
             <div className="lg:col-span-3 space-y-4">
               {signal && (
                 <>
-                  <div className="rounded-xl border border-border bg-surface p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <signal.index.icon size={20} style={{ color: signal.index.color }} />
-                        <span className="font-semibold">{signal.index.label}</span>
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${signal.direction === "up" ? "bg-success/15 text-success border border-success/30" : "bg-danger/15 text-danger border border-danger/30"}`}>
-                          {signal.direction === "up" ? "ACHAT" : "VENTE"}
-                        </span>
-                      </div>
-                      <a href={`${DERIV_URL}?symbol=${signal.index.symbol}`} target="_blank" rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 py-1 text-xs font-semibold rounded-lg bg-primary/10 text-primary border border-primary/30 hover:bg-primary/20 transition-all">
-                        <ExternalLink size={12} /> Deriv
-                      </a>
-                    </div>
-                    <div ref={chartRef} className="w-full" />
-                  </div>
-
                   <div className="rounded-xl border border-primary/30 bg-primary/5 p-5">
                     <div className="flex items-center justify-between mb-3">
                       <span className="font-bold text-sm flex items-center gap-2">
