@@ -3,6 +3,11 @@
 
 export type IndexType = "BOOM" | "CRASH";
 
+let touchModeEnabled = false;
+
+export function setTouchMode(v: boolean) { touchModeEnabled = v; }
+export function getTouchMode() { return touchModeEnabled; }
+
 export interface IndexState {
   price: number;
   change24h: number;
@@ -774,6 +779,27 @@ export function predictSpike(type: IndexType, num: number) {
   const magnitudePct = (0.008 + bestScore * 0.04) * (recentRange / 0.005);
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
+  let levelTouched = false;
+  if (touchModeEnabled) {
+    const touchThreshold = 0.0008;
+    const touchWindow = Math.min(history.length, 40);
+    if (isBoom && nearestSupport) {
+      for (let i = history.length - touchWindow; i < history.length; i++) {
+        if (Math.abs(history[i] - nearestSupport.price) / nearestSupport.price < touchThreshold) {
+          levelTouched = true; break;
+        }
+      }
+    } else if (!isBoom && nearestResistance) {
+      for (let i = history.length - touchWindow; i < history.length; i++) {
+        if (Math.abs(history[i] - nearestResistance.price) / nearestResistance.price < touchThreshold) {
+          levelTouched = true; break;
+        }
+      }
+    }
+  } else {
+    levelTouched = true;
+  }
+
   const pricePos = nearestSupport && nearestResistance
     ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
     : 50;
@@ -845,7 +871,8 @@ export function predictSpike(type: IndexType, num: number) {
     expectedDirection: expDir,
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: probability >= 80,
+    isSpikeImminent: probability >= 80 && levelTouched,
+    levelTouched,
     pricePosition: pricePos,
     consecutiveMoves: bestConsecutive,
     rangeLow: nearestSupport?.price ?? currentPrice * 0.98,

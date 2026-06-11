@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { createChart, IChartApi, CandlestickSeries, ISeriesApi, ColorType, CrosshairMode } from "lightweight-charts";
 import type { Candlestick, Signal, IndexType } from "@/lib/deriv";
-import { initDerivClient, getDerivState, predictSpike, getCandlesticks } from "@/lib/deriv";
+import { initDerivClient, getDerivState, predictSpike, getCandlesticks, setTouchMode, getTouchMode } from "@/lib/deriv";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
 
@@ -40,6 +40,7 @@ interface DetectedSignal {
   referenceStrength?: number;
   sRlevels?: SRLevel[];
   referenceLevel?: number;
+  levelTouched?: boolean;
 }
 
 const INDICES: IndexInfo[] = [
@@ -63,6 +64,7 @@ export default function PredictionGame() {
   const [candles, setCandles] = useState<Candlestick[]>([]);
   const [isPremium, setIsPremium] = useState(false);
   const [signalUsage, setSignalUsage] = useState({ used: 0, limit: 3, remaining: 3 });
+  const [touchMode, setTouchModeState] = useState(getTouchMode());
 
   const chartRef = useRef<HTMLDivElement>(null);
   const chartApiRef = useRef<IChartApi | null>(null);
@@ -78,6 +80,12 @@ export default function PredictionGame() {
   const selectedIdx = selectedSignal
     ? INDICES.find(i => `${i.type}_${i.number}` === selectedSignal)
     : null;
+
+  const toggleTouchMode = () => {
+    const next = !touchMode;
+    setTouchMode(next);
+    setTouchModeState(next);
+  };
 
   const scanAll = useCallback(() => {
     try {
@@ -96,6 +104,7 @@ export default function PredictionGame() {
         if (!raw || "error" in raw) continue;
         const p = raw as any;
         if (!p.isSpikeImminent || p.spikeProbability < MIN_PROBABILITY) continue;
+        if (touchMode && !p.levelTouched) continue;
 
         seen.add(k);
         newSignals.push({
@@ -116,6 +125,7 @@ export default function PredictionGame() {
           referenceStrength: p.referenceStrength,
           sRlevels: p.sRlevels,
           referenceLevel: p.referenceLevel,
+          levelTouched: p.levelTouched,
         });
 
         if (!selectedSignal) setSelectedSignal(k);
@@ -210,6 +220,15 @@ export default function PredictionGame() {
               {activeSignals.length} signal{activeSignals.length > 1 ? "x" : ""} actif{activeSignals.length > 1 ? "s" : ""}
             </span>
           )}
+          <button onClick={toggleTouchMode}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+              touchMode
+                ? "bg-primary/15 text-primary border-primary/30"
+                : "bg-surface text-text-muted border-border"
+            }`}>
+            <span className={`w-2 h-2 rounded-full ${touchMode ? "bg-primary" : "bg-text-muted"}`} />
+            Contact S/R {touchMode ? "ON" : "OFF"}
+          </button>
         </div>
 
         {connected && activeSignals.length === 0 && (
@@ -324,6 +343,18 @@ export default function PredictionGame() {
                       </div>
                     </div>
 
+                    {touchMode && signal.levelTouched !== undefined && (
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg mb-3 text-[10px] font-medium ${
+                        signal.levelTouched
+                          ? "bg-success/10 text-success border border-success/20"
+                          : "bg-warning/10 text-warning border border-warning/20"
+                      }`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${signal.levelTouched ? "bg-success" : "bg-warning"}`} />
+                        {signal.levelTouched
+                          ? "✓ Niveau S/R touché — Signal confirmé"
+                          : "⏳ En attente de contact du niveau S/R"}
+                      </div>
+                    )}
                     <div className="p-2.5 rounded-lg bg-surface-light/50 border border-border text-[10px] text-text-secondary leading-relaxed mb-3">
                       <span className="font-semibold text-text-muted">Raisonnement : </span>
                       {signal.consecutiveMoves !== undefined && (
