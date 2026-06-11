@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   Brain, Flame, Droplet, AlertTriangle, BarChart3,
-  ExternalLink, Zap, Wifi, WifiOff,
+  ExternalLink, Zap, Wifi, WifiOff, Clock,
 } from "lucide-react";
 import type { Signal, IndexType } from "@/lib/deriv";
 import { initDerivClient, getDerivState, predictSpike, setTouchMode, getTouchMode } from "@/lib/deriv";
+import { addToHistory, getTodayHistory } from "@/lib/signalHistory";
+import type { HistoryEntry } from "@/lib/signalHistory";
 interface SRLevel {
   price: number;
   strength: number;
@@ -51,11 +53,71 @@ const INDICES: IndexInfo[] = [
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
 const MIN_PROBABILITY = 80;
 
+function HistoryView() {
+  const entries = useMemo(() => {
+    const all = getTodayHistory();
+    return all.sort((a, b) => b.detectedAt - a.detectedAt);
+  }, []);
+
+  if (entries.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <Clock size={40} className="mx-auto mb-4 text-text-muted" />
+        <p className="text-text-secondary text-sm">Aucun signal enregistré aujourd'hui</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-text-muted border-b border-border">
+            <th className="text-left py-2 pr-3 font-semibold">Heure</th>
+            <th className="text-left py-2 pr-3 font-semibold">Indice</th>
+            <th className="text-left py-2 pr-3 font-semibold">Direction</th>
+            <th className="text-right py-2 pr-3 font-semibold">Proba</th>
+            <th className="text-right py-2 pr-3 font-semibold">Entrée</th>
+            <th className="text-right py-2 pr-3 font-semibold">SL</th>
+            <th className="text-right py-2 pr-3 font-semibold">TP</th>
+            <th className="text-right py-2 font-semibold">Ampleur</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((e, i) => {
+            const t = new Date(e.detectedAt);
+            const timeStr = `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
+            const isUp = e.direction === "up";
+            return (
+              <tr key={i} className="border-b border-border/50 hover:bg-surface/30 transition-colors">
+                <td className="py-2 pr-3 text-text-muted whitespace-nowrap">{timeStr}</td>
+                <td className="py-2 pr-3 font-medium whitespace-nowrap">{e.label}</td>
+                <td className={`py-2 pr-3 font-medium ${isUp ? "text-success" : "text-danger"}`}>
+                  {isUp ? "↑ ACHAT" : "↓ VENTE"}
+                </td>
+                <td className="py-2 pr-3 text-right font-mono">{e.probability}%</td>
+                <td className="py-2 pr-3 text-right font-mono">${e.entryPrice.toFixed(2)}</td>
+                <td className="py-2 pr-3 text-right font-mono text-danger">${e.stopLoss.toFixed(2)}</td>
+                <td className="py-2 pr-3 text-right font-mono text-success">${e.takeProfit.toFixed(2)}</td>
+                <td className="py-2 text-right font-mono">{e.magnitude}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="text-xs text-text-muted mt-3 text-center">
+        {entries.length} signal{entries.length > 1 ? "x" : ""} aujourd'hui
+      </p>
+    </div>
+  );
+}
+
 export default function PredictionGame() {
   const [connected, setConnected] = useState(false);
   const [activeSignals, setActiveSignals] = useState<DetectedSignal[]>([]);
   const [selectedSignal, setSelectedSignal] = useState<string | null>(null);
   const [touchMode, setTouchModeState] = useState(getTouchMode());
+  const [showHistory, setShowHistory] = useState(false);
 
   const selectedIdx = selectedSignal
     ? INDICES.find(i => `${i.type}_${i.number}` === selectedSignal)
@@ -109,6 +171,18 @@ export default function PredictionGame() {
         });
 
         if (!selectedSignal) setSelectedSignal(k);
+
+        addToHistory({
+          key: k, label: idx.label,
+          direction: p.expectedDirection,
+          probability: p.spikeProbability ?? 0,
+          entryPrice: p.entryPrice ?? p.currentPrice ?? 0,
+          stopLoss: p.stopLoss ?? 0,
+          takeProfit: p.takeProfit ?? 0,
+          magnitude: p.estimatedMagnitude ?? "0%",
+          detectedAt: now,
+          expiredAt: now + SIGNAL_EXPIRY_MS,
+        });
       }
 
       setActiveSignals(prev => {
@@ -170,6 +244,15 @@ export default function PredictionGame() {
               {activeSignals.length} signal{activeSignals.length > 1 ? "x" : ""} actif{activeSignals.length > 1 ? "s" : ""}
             </span>
           )}
+          <button onClick={() => setShowHistory(!showHistory)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+              showHistory
+                ? "bg-primary/15 text-primary border-primary/30"
+                : "bg-surface text-text-muted border-border"
+            }`}>
+            <BarChart3 size={12} />
+            Historique
+          </button>
           <button onClick={toggleTouchMode}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
               touchMode
@@ -200,7 +283,11 @@ export default function PredictionGame() {
           </div>
         )}
 
-        {activeSignals.length > 0 && (
+        {showHistory && (
+          <HistoryView />
+        )}
+
+        {!showHistory && activeSignals.length > 0 && (
           <div className="grid lg:grid-cols-5 gap-6">
             <div className="lg:col-span-2 space-y-2">
               {activeSignals.map((s) => {
