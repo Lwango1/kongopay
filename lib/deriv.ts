@@ -796,6 +796,21 @@ export function predictSpike(type: IndexType, num: number) {
     levelTouched = true;
   }
 
+  // Approche predictive : est-ce que le prix se dirige vers le niveau S/R ?
+  let isApproaching = false;
+  const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
+  if (approachLevel) {
+    const recent = history.slice(-6);
+    let towardCount = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const priceRise = recent[i] > recent[i - 1];
+      const levelAbove = approachLevel > currentPrice;
+      const movingToward = levelAbove ? priceRise : !priceRise;
+      if (movingToward) towardCount++;
+    }
+    isApproaching = towardCount >= 3;
+  }
+
   const pricePos = nearestSupport && nearestResistance
     ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
     : 50;
@@ -867,8 +882,9 @@ export function predictSpike(type: IndexType, num: number) {
     expectedDirection: expDir,
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: probability >= 80 && levelTouched,
+    isSpikeImminent: probability >= 75 && (levelTouched || isApproaching),
     levelTouched,
+    isApproaching,
     pricePosition: pricePos,
     consecutiveMoves: bestConsecutive,
     rangeLow: nearestSupport?.price ?? currentPrice * 0.98,

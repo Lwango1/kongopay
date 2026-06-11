@@ -372,6 +372,19 @@ class DerivLiveService {
     const consecutive = recentMoves.slice(-5).filter(m => (type === 'BOOM' ? m < 0 : m > 0)).length;
     const momentumFactor = Math.min(consecutive / 5, 1);
 
+    // Approche predictive : est-ce que le prix se dirige vers le niveau S/R ?
+    let isApproaching = false;
+    if (referenceLevel) {
+      const recent = history.slice(-6);
+      let towardCount = 0;
+      for (let i = 1; i < recent.length; i++) {
+        const levelAbove = referenceLevel > currentPrice;
+        const movingToward = levelAbove ? recent[i] > recent[i - 1] : recent[i] < recent[i - 1];
+        if (movingToward) towardCount++;
+      }
+      isApproaching = towardCount >= 3;
+    }
+
     const msSinceLastSpike = Date.now() - st.lastSpikeTime;
     const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
 
@@ -407,6 +420,7 @@ class DerivLiveService {
       estimatedMagnitude: `${estimatedMagnitude}%`,
       timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
       isSpikeImminent: spikeProbability > 70,
+      isApproaching,
       pricePosition: nearestSupport && nearestResistance
         ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
         : 50,

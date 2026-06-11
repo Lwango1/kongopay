@@ -65,6 +65,7 @@ export interface MarketOpportunity {
   expectedDirection: string;
   estimatedMagnitude: string;
   isSpikeImminent: boolean;
+  isApproaching?: boolean;
   timeSinceLastSpike: number;
   pricePosition: number;
   consecutiveMoves: number;

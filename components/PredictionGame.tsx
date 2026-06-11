@@ -39,6 +39,7 @@ interface DetectedSignal {
   sRlevels?: SRLevel[];
   referenceLevel?: number;
   levelTouched?: boolean;
+  isApproaching?: boolean;
 }
 
 const INDICES: IndexInfo[] = [
@@ -146,7 +147,7 @@ export default function PredictionGame() {
         if (!raw || "error" in raw) continue;
         const p = raw as any;
         if (!p.isSpikeImminent || p.spikeProbability < MIN_PROBABILITY) continue;
-        if (touchMode && !p.levelTouched) continue;
+        if (touchMode && !p.levelTouched && !p.isApproaching) continue;
 
         seen.add(k);
         newSignals.push({
@@ -168,6 +169,7 @@ export default function PredictionGame() {
           sRlevels: p.sRlevels,
           referenceLevel: p.referenceLevel,
           levelTouched: p.levelTouched,
+          isApproaching: p.isApproaching,
         });
 
         if (!selectedSignal) setSelectedSignal(k);
@@ -363,16 +365,20 @@ export default function PredictionGame() {
                       </div>
                     </div>
 
-                    {touchMode && signal.levelTouched !== undefined && (
+                    {touchMode && (signal.levelTouched !== undefined || signal.isApproaching !== undefined) && (
                       <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg mb-3 text-[10px] font-medium ${
                         signal.levelTouched
                           ? "bg-success/10 text-success border border-success/20"
+                          : signal.isApproaching
+                          ? "bg-primary/10 text-primary border border-primary/20"
                           : "bg-warning/10 text-warning border border-warning/20"
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${signal.levelTouched ? "bg-success" : "bg-warning"}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full ${signal.levelTouched ? "bg-success" : signal.isApproaching ? "bg-primary" : "bg-warning"}`} />
                         {signal.levelTouched
                           ? "✓ Niveau S/R touché — Signal confirmé"
-                          : "⏳ En attente de contact du niveau S/R"}
+                          : signal.isApproaching
+                          ? "⟶ Prix en approche du niveau S/R — Signal prédictif"
+                          : "⏳ En attente d'approche du niveau S/R"}
                       </div>
                     )}
                     <div className="p-2.5 rounded-lg bg-surface-light/50 border border-border text-[10px] text-text-secondary leading-relaxed mb-3">
