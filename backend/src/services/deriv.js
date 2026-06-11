@@ -377,9 +377,11 @@ class DerivLiveService {
     const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.15;
     const spikeProbability = Math.min((extremeFactor * 0.55 + momentumFactor * 0.2 + timeFactor * 0.1 + strengthBonus) * 100, 95);
 
-    const atr = this.calculateATR(history, 14);
-    const volatilityPct = currentPrice > 0 ? atr / currentPrice : 0.005;
-    const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * (volatilityPct / 0.005) * 100).toFixed(1);
+    const lookback = Math.min(history.length, 100);
+    const recentHigh = Math.max(...history.slice(-lookback));
+    const recentLow = Math.min(...history.slice(-lookback));
+    const recentRange = currentPrice > 0 ? (recentHigh - recentLow) / currentPrice : 0.005;
+    const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * (recentRange / 0.005) * 100).toFixed(1);
     const isUp = expectedDirection === 'up';
     const entryPrice = isUp
       ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)

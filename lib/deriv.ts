@@ -767,8 +767,11 @@ export function predictSpike(type: IndexType, num: number) {
     tpMultiplier = 1.4;
   }
 
-  const volatilityPct = currentPrice > 0 ? vol / currentPrice : 0.005;
-  const magnitudePct = (0.008 + bestScore * 0.04) * (volatilityPct / 0.005);
+  const lookback = Math.min(history.length, 100);
+  const recentHigh = Math.max(...history.slice(-lookback));
+  const recentLow = Math.min(...history.slice(-lookback));
+  const recentRange = currentPrice > 0 ? (recentHigh - recentLow) / currentPrice : 0.005;
+  const magnitudePct = (0.008 + bestScore * 0.04) * (recentRange / 0.005);
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
   const pricePos = nearestSupport && nearestResistance
