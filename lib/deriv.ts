@@ -594,22 +594,22 @@ function scoreSignal(
   const exhaustionScore = consecutive >= 4 ? 0.3 : 0;
 
   let rsiScore = 0;
-  if (isUp && rsiVal < 15) rsiScore = 0.4;
-  else if (!isUp && rsiVal > 85) rsiScore = 0.4;
-  else if (isUp && rsiVal < 25) rsiScore = 0.2;
-  else if (!isUp && rsiVal > 75) rsiScore = 0.2;
+  if (isUp && rsiVal < 15) rsiScore = 0.2;
+  else if (!isUp && rsiVal > 85) rsiScore = 0.2;
+  else if (isUp && rsiVal < 25) rsiScore = 0.1;
+  else if (!isUp && rsiVal > 75) rsiScore = 0.1;
 
   let marketScore = 0;
-  if (isUp && market.trend === "uptrend") marketScore = 0.2;
-  else if (!isUp && market.trend === "downtrend") marketScore = 0.2;
-  else if (market.trend === "ranging") marketScore = 0.1;
+  if (isUp && market.trend === "uptrend") marketScore = 0.1;
+  else if (!isUp && market.trend === "downtrend") marketScore = 0.1;
+  else if (market.trend === "ranging") marketScore = 0.05;
 
-  if (isUp && market.liquiditySwept && market.lastBreakout === "bullish") marketScore += 0.15;
-  else if (!isUp && market.liquiditySwept && market.lastBreakout === "bearish") marketScore += 0.15;
+  if (isUp && market.liquiditySwept && market.lastBreakout === "bullish") marketScore += 0.08;
+  else if (!isUp && market.liquiditySwept && market.lastBreakout === "bearish") marketScore += 0.08;
 
-  const strengthBonus = Math.min(refStrength / 5, 1) * 0.1;
+  const strengthBonus = Math.min(refStrength / 5, 1) * 0.08;
 
-  const score = nearLevel * 0.15 + momentumScore * 0.15 + rsiScore + marketScore + strengthBonus + exhaustionScore;
+  const score = nearLevel * 0.12 + momentumScore * 0.15 + rsiScore + marketScore + strengthBonus + exhaustionScore;
   return { score: Math.min(score, 1), referenceLevel: refLevel, referenceStrength: refStrength, distancePct: distance / (refLevel || currentPrice) * 100, consecutive };
 }
 
@@ -673,10 +673,10 @@ export function predictSpike(type: IndexType, num: number) {
   if (macdResult) {
     const macdBullish = macdResult.histogram > 0 && macdResult.macd > macdResult.signal;
     const macdBearish = macdResult.histogram < 0 && macdResult.macd < macdResult.signal;
-    if (isBoom && macdBullish) indicatorBonus += 0.10;
-    else if (!isBoom && macdBearish) indicatorBonus += 0.10;
-    else if (isBoom && macdBearish) indicatorBonus -= 0.06;
-    else if (!isBoom && macdBullish) indicatorBonus -= 0.06;
+    if (isBoom && macdBullish) indicatorBonus += 0.05;
+    else if (!isBoom && macdBearish) indicatorBonus += 0.05;
+    else if (isBoom && macdBearish) indicatorBonus -= 0.03;
+    else if (!isBoom && macdBullish) indicatorBonus -= 0.03;
   }
 
   // Bollinger Bands squeeze/breakout
@@ -684,59 +684,57 @@ export function predictSpike(type: IndexType, num: number) {
     const nearLower = Math.abs(currentPrice - bbResult.lower) / bbResult.lower < 0.005;
     const nearUpper = Math.abs(currentPrice - bbResult.upper) / bbResult.upper < 0.005;
     const squeeze = bbResult.bandwidth < 0.05;
-    if (squeeze) indicatorBonus += 0.06;
-    if (isBoom && nearLower) indicatorBonus += 0.06;
-    if (!isBoom && nearUpper) indicatorBonus += 0.06;
+    if (squeeze) indicatorBonus += 0.03;
+    if (isBoom && nearLower) indicatorBonus += 0.03;
+    if (!isBoom && nearUpper) indicatorBonus += 0.03;
   }
 
   // Ichimoku confirmation
   if (ichimokuResult) {
     const tenkanAboveKijun = ichimokuResult.tenkan > ichimokuResult.kijun;
-    if (isBoom && currentPrice < ichimokuResult.senkouA && tenkanAboveKijun) indicatorBonus += 0.08;
-    if (!isBoom && currentPrice > ichimokuResult.senkouA && !tenkanAboveKijun) indicatorBonus += 0.08;
+    if (isBoom && currentPrice < ichimokuResult.senkouA && tenkanAboveKijun) indicatorBonus += 0.04;
+    if (!isBoom && currentPrice > ichimokuResult.senkouA && !tenkanAboveKijun) indicatorBonus += 0.04;
   }
 
   // StochRSI extrême
-  if (isBoom && stochRsi < 20) indicatorBonus += 0.08;
-  else if (!isBoom && stochRsi > 80) indicatorBonus += 0.08;
-  else if (isBoom && stochRsi > 80) indicatorBonus -= 0.05;
-  else if (!isBoom && stochRsi < 20) indicatorBonus -= 0.05;
+  if (isBoom && stochRsi < 20) indicatorBonus += 0.04;
+  else if (!isBoom && stochRsi > 80) indicatorBonus += 0.04;
+  else if (isBoom && stochRsi > 80) indicatorBonus -= 0.03;
+  else if (!isBoom && stochRsi < 20) indicatorBonus -= 0.03;
 
   // ADX trend strength (Boom: trend up, Crash: trend down)
   if (adx > 25) {
-    if (isBoom && trendStrength > 10) indicatorBonus += 0.06;
-    else if (!isBoom && trendStrength < -10) indicatorBonus += 0.06;
+    if (isBoom && trendStrength > 10) indicatorBonus += 0.03;
+    else if (!isBoom && trendStrength < -10) indicatorBonus += 0.03;
   }
 
   // --- Ajustement par patterns de chandeliers ---
   let patternBonus = 0;
   if (isBoom && patternSignal.signal === "bullish") {
-    patternBonus = Math.min(patternSignal.score / 10, 0.10);
+    patternBonus = Math.min(patternSignal.score / 20, 0.05);
   } else if (!isBoom && patternSignal.signal === "bearish") {
-    patternBonus = Math.min(Math.abs(patternSignal.score) / 10, 0.10);
+    patternBonus = Math.min(Math.abs(patternSignal.score) / 20, 0.05);
   } else if (isBoom && patternSignal.signal === "bearish") {
-    patternBonus = -0.05;
+    patternBonus = -0.03;
   } else if (!isBoom && patternSignal.signal === "bullish") {
-    patternBonus = -0.05;
+    patternBonus = -0.03;
   }
 
   // --- Ajustement par régime de volatilité ---
   let regimeBonus = 0;
-  if (isBoom && regime.market === "trending_bull") regimeBonus += 0.06;
-  else if (!isBoom && regime.market === "trending_bear") regimeBonus += 0.06;
-  else if (regime.market === "volatile") regimeBonus += 0.04;
-  else if (regime.market === "calm") regimeBonus -= 0.03;
+  if (isBoom && regime.market === "trending_bull") regimeBonus += 0.03;
+  else if (!isBoom && regime.market === "trending_bear") regimeBonus += 0.03;
+  else if (regime.market === "volatile") regimeBonus += 0.02;
+  else if (regime.market === "calm") regimeBonus -= 0.02;
 
   bestScore = Math.min(bestScore + indicatorBonus + patternBonus + regimeBonus, 1);
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
-  const recoveryTime = Math.min(msSinceLastSpike / 60000, 1);
-  let probability = Math.min((bestScore * 0.85 + recoveryTime * 0.15) * 100, 97);
+  let probability = Math.min(Math.max(bestScore * 100, 20), 97);
 
-  // Multi-timeframe confirmation (seulement sur la direction correcte)
+  // Multi-timeframe confirmation
   const prices5m = candlePrices(candleMap5m, key);
   const prices15m = candlePrices(candleMap15m, key);
-  let tfBonus = 0;
   if (prices5m.length > 10) {
     const rsi5m = rsi(prices5m);
     const market5m = analyzeMarketStructure(prices5m);
@@ -744,9 +742,8 @@ export function predictSpike(type: IndexType, num: number) {
     const ref5m = isBoom ? (s5?.price ?? Math.min(...prices5m.slice(-20))) : (r5?.price ?? Math.max(...prices5m.slice(-20)));
     const str5m = isBoom ? (s5?.strength ?? 1) : (r5?.strength ?? 1);
     const score5m = scoreSignal(currentPrice, ref5m, str5m, prices5m, isUp, rsi5m, market5m);
-    const agree5m = score5m.score > 0.5;
-    if (agree5m) tfBonus += 0.12;
-    else tfBonus -= 0.10;
+    if (score5m.score > 0.5) probability += 6;
+    else probability -= 5;
   }
   if (prices15m.length > 10) {
     const rsi15m = rsi(prices15m);
@@ -755,11 +752,10 @@ export function predictSpike(type: IndexType, num: number) {
     const ref15m = isBoom ? (s15?.price ?? Math.min(...prices15m.slice(-20))) : (r15?.price ?? Math.max(...prices15m.slice(-20)));
     const str15m = isBoom ? (s15?.strength ?? 1) : (r15?.strength ?? 1);
     const score15m = scoreSignal(currentPrice, ref15m, str15m, prices15m, isUp, rsi15m, market15m);
-    const agree15m = score15m.score > 0.5;
-    if (agree15m) tfBonus += 0.08;
-    else tfBonus -= 0.06;
+    if (score15m.score > 0.5) probability += 4;
+    else probability -= 3;
   }
-  probability = Math.min(Math.max(probability + tfBonus * 100, 0), 97);
+  probability = Math.min(Math.max(probability, 0), 97);
 
   // Ajustement SL/TP selon volatilité
   let slMultiplier = 0.6;

@@ -374,8 +374,8 @@ class DerivLiveService {
     const msSinceLastSpike = Date.now() - st.lastSpikeTime;
     const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
 
-    const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.15;
-    const spikeProbability = Math.min((extremeFactor * 0.55 + momentumFactor * 0.2 + timeFactor * 0.1 + strengthBonus) * 100, 95);
+    const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.08;
+    const spikeProbability = Math.min((extremeFactor * 0.40 + momentumFactor * 0.15 + timeFactor * 0.05 + strengthBonus) * 100, 95);
 
     const lookback = Math.min(history.length, 100);
     const recentHigh = Math.max(...history.slice(-lookback));
