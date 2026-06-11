@@ -132,9 +132,22 @@ export default function PredictionGame() {
       }
 
       setActiveSignals(prev => {
-        const merged = [...prev.filter(s => !seen.has(s.key) && now - s.detectedAt < SIGNAL_EXPIRY_MS)];
+        const merged = prev.filter(s => now - s.detectedAt < SIGNAL_EXPIRY_MS);
         for (const ns of newSignals) {
-          if (!merged.find(s => s.key === ns.key)) merged.push(ns);
+          const existing = merged.find(s => s.key === ns.key);
+          if (existing) {
+            existing.probability = ns.probability;
+            existing.magnitude = ns.magnitude;
+            existing.timeSinceSpike = ns.timeSinceSpike;
+            existing.upScore = ns.upScore;
+            existing.downScore = ns.downScore;
+            existing.consecutiveMoves = ns.consecutiveMoves;
+            existing.distancePercent = ns.distancePercent;
+            existing.referenceStrength = ns.referenceStrength;
+            existing.levelTouched = ns.levelTouched;
+          } else {
+            merged.push(ns);
+          }
         }
         merged.sort((a, b) => b.probability - a.probability);
         return merged;
