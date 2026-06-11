@@ -299,6 +299,14 @@ export default function DerivChart() {
                prediction.regime.market === "calm" ? "Calme" : "Range"}
             </span>
           )}
+          {prediction && (
+            <span className="text-xs text-text-muted font-mono">
+              v{typeof prediction.volScale === 'number' ? prediction.volScale.toFixed(1) : '-'}
+              {typeof prediction.approachVelocity === 'number' && prediction.approachVelocity > 0
+                ? ` · ${prediction.approachVelocity.toFixed(2)}`
+                : ''}
+            </span>
+          )}
         </div>
 
         {/* Main chart area */}

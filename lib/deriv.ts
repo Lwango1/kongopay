@@ -757,6 +757,8 @@ export function predictSpike(type: IndexType, num: number) {
   }
   probability = Math.min(Math.max(probability, 0), 97);
 
+  const volScale = vol > 0 ? Math.max((vol / (currentPrice || 1)) / 0.0005, 0.5) : 1;
+
   // Ajustement SL/TP selon volatilité
   let slMultiplier = 0.6;
   let tpMultiplier = 1.8;
@@ -772,7 +774,7 @@ export function predictSpike(type: IndexType, num: number) {
   const recentHigh = Math.max(...history.slice(-lookback));
   const recentLow = Math.min(...history.slice(-lookback));
   const recentRange = currentPrice > 0 ? (recentHigh - recentLow) / currentPrice : 0.005;
-  const magnitudePct = (0.008 + bestScore * 0.04) * (recentRange / 0.005);
+  const magnitudePct = (0.008 + bestScore * 0.04) * (recentRange / 0.005) * volScale;
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
   let levelTouched = false;
@@ -796,20 +798,28 @@ export function predictSpike(type: IndexType, num: number) {
     levelTouched = true;
   }
 
-  // Approche predictive : est-ce que le prix se dirige vers le niveau S/R ?
-  let isApproaching = false;
-  const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
-  if (approachLevel) {
-    const recent = history.slice(-6);
-    let towardCount = 0;
-    for (let i = 1; i < recent.length; i++) {
-      const priceRise = recent[i] > recent[i - 1];
-      const levelAbove = approachLevel > currentPrice;
-      const movingToward = levelAbove ? priceRise : !priceRise;
-      if (movingToward) towardCount++;
+    // Approche predictive : velocity + divergence
+    let isApproaching = false;
+    let approachVelocity = 0;
+    const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
+    if (approachLevel) {
+      const recent = history.slice(-10);
+      let towardCount = 0;
+      for (let i = 1; i < recent.length; i++) {
+        const priceRise = recent[i] > recent[i - 1];
+        const levelAbove = approachLevel > currentPrice;
+        const movingToward = levelAbove ? priceRise : !priceRise;
+        if (movingToward) towardCount++;
+      }
+      const slice = history.slice(-8);
+      const slope = (slice[slice.length - 1] - slice[0]) / slice.length;
+      const avgPrice2 = (currentPrice + approachLevel) / 2 || 1;
+      const volScale2 = vol > 0 ? Math.max((vol / avgPrice2) / 0.0005, 0.5) : 1;
+      approachVelocity = Math.abs(slope) / avgPrice2 / volScale2;
+      const rsiRecent = rsi(history.slice(-30));
+      const rsiDivergence = (isBoom && rsiRecent < 40) || (!isBoom && rsiRecent > 60);
+      isApproaching = (towardCount >= 3 || approachVelocity > 0.3) || (towardCount >= 2 && rsiDivergence);
     }
-    isApproaching = towardCount >= 3;
-  }
 
   const pricePos = nearestSupport && nearestResistance
     ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
@@ -891,9 +901,11 @@ export function predictSpike(type: IndexType, num: number) {
     expectedDirection: expDir,
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: probability >= 75 && (levelTouched || isApproaching),
+    isSpikeImminent: probability >= (volScale > 1.5 ? 72 : 75) && (levelTouched || isApproaching),
     levelTouched,
     isApproaching,
+    approachVelocity: Math.round(approachVelocity * 100) / 100,
+    volScale: Math.round(volScale * 100) / 100,
     pricePosition: pricePos,
     consecutiveMoves: bestConsecutive,
     rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
@@ -1167,6 +1179,9 @@ export interface MarketOpportunity {
   expectedDirection: "up" | "down";
   estimatedMagnitude: string;
   isSpikeImminent: boolean;
+  levelTouched?: boolean;
+  isApproaching?: boolean;
+  approachVelocity?: number;
   timeSinceLastSpike: number;
   pricePosition: number;
   consecutiveMoves: number;
@@ -1177,6 +1192,10 @@ export interface MarketOpportunity {
   downScore: number;
   sRlevels: { price: number; strength: number; type: "support" | "resistance" }[];
   orderBlocks: { price: number; type: "bullish" | "bearish"; strength: number }[];
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  volScale?: number;
   connected: boolean;
   timestamp: number;
   indicators?: any;
@@ -1216,6 +1235,9 @@ export function scanAllMarkets(): MarketScanResult {
       expectedDirection: prediction.expectedDirection as "up" | "down",
       estimatedMagnitude: prediction.estimatedMagnitude,
       isSpikeImminent: prediction.isSpikeImminent,
+      levelTouched: prediction.levelTouched,
+      isApproaching: prediction.isApproaching,
+      approachVelocity: prediction.approachVelocity,
       timeSinceLastSpike: prediction.timeSinceLastSpike,
       pricePosition: prediction.pricePosition,
       consecutiveMoves: prediction.consecutiveMoves,
@@ -1226,6 +1248,12 @@ export function scanAllMarkets(): MarketScanResult {
       downScore: prediction.downScore,
       sRlevels: prediction.sRlevels,
       orderBlocks: prediction.orderBlocks,
+      entryPrice: prediction.entryPrice,
+      stopLoss: prediction.stopLoss,
+      takeProfit: prediction.takeProfit,
+      volScale: prediction.volScale,
+      regime: prediction.regime,
+      candlePatterns: prediction.candlePatterns,
       connected: prediction.connected,
       timestamp: prediction.timestamp,
     });

@@ -17,8 +17,20 @@ export interface SpikePrediction {
   estimatedMagnitude: string;
   timeSinceLastSpike: number;
   isSpikeImminent: boolean;
+  levelTouched?: boolean;
+  isApproaching?: boolean;
+  approachVelocity?: number;
   pricePosition: number;
   consecutiveMoves: number;
+  upScore?: number;
+  downScore?: number;
+  regime?: { volatility: string; market: string; recommendation: string };
+  candlePatterns?: { name: string; signal: string; strength: number }[];
+  orderBlocks?: { price: number; type: string; strength: number }[];
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  volScale?: number;
   error?: string;
 }
 
@@ -65,10 +77,21 @@ export interface MarketOpportunity {
   expectedDirection: string;
   estimatedMagnitude: string;
   isSpikeImminent: boolean;
+  levelTouched?: boolean;
   isApproaching?: boolean;
+  approachVelocity?: number;
   timeSinceLastSpike: number;
   pricePosition: number;
   consecutiveMoves: number;
+  upScore?: number;
+  downScore?: number;
+  regime?: { volatility: string; market: string; recommendation: string };
+  candlePatterns?: { name: string; signal: string; strength: number }[];
+  orderBlocks?: { price: number; type: string; strength: number }[];
+  entryPrice?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  volScale?: number;
   connected: boolean;
   timestamp: number;
 }

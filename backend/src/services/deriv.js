@@ -28,6 +28,9 @@ function keyFromSymbol(symbol) {
 class DerivLiveService {
   constructor() {
     this.stateMap = new Map();
+    this.candleMap1m = new Map();
+    this.candleMap5m = new Map();
+    this.candleMap15m = new Map();
     this.priceAt24hAgo = new Map();
     this.ws = null;
     this.wsConnected = false;
@@ -38,7 +41,8 @@ class DerivLiveService {
     this.maxReconnectDelay = 30000;
 
     for (const idx of INDICES) {
-      this.stateMap.set(getKey(idx.type, idx.number), {
+      const key = getKey(idx.type, idx.number);
+      this.stateMap.set(key, {
         price: 0,
         change24h: 0,
         history: [],
@@ -47,7 +51,36 @@ class DerivLiveService {
         lastSpikeDirection: null,
         connected: false,
       });
+      this.candleMap1m.set(key, []);
+      this.candleMap5m.set(key, []);
+      this.candleMap15m.set(key, []);
     }
+  }
+
+  updateCandleMulti(key, price, timeMs) {
+    const intervals = [
+      { seconds: 60, map: this.candleMap1m },
+      { seconds: 300, map: this.candleMap5m },
+      { seconds: 900, map: this.candleMap15m },
+    ];
+    for (const { seconds, map } of intervals) {
+      const candles = map.get(key);
+      if (!candles) continue;
+      const candleTime = Math.floor(timeMs / 1000 / seconds) * seconds;
+      if (candles.length === 0 || candles[candles.length - 1].time !== candleTime) {
+        candles.push({ time: candleTime, open: price, high: price, low: price, close: price });
+        if (candles.length > 200) candles.shift();
+      } else {
+        const last = candles[candles.length - 1];
+        last.high = Math.max(last.high, price);
+        last.low = Math.min(last.low, price);
+        last.close = price;
+      }
+    }
+  }
+
+  candlePrices(map, key) {
+    return (map.get(key) || []).map(c => c.close);
   }
 
   startKeepAlive() {
@@ -95,6 +128,8 @@ class DerivLiveService {
     st.history.push(quote);
     st.timestamps.push(ts);
     st.connected = true;
+
+    this.updateCandleMulti(key, quote, ts);
 
     if (st.history.length > 500) {
       st.history.shift();
@@ -322,135 +357,241 @@ class DerivLiveService {
 
     const history = st.history;
     const currentPrice = st.price;
+    const vol = this.calculateATR(history);
+    const rsiVal = this.calculateRSI(history);
+    const market = this.analyzeMarketStructure(history);
     const { nearestSupport, nearestResistance, allLevels } = this.findSupportResistance(history, currentPrice);
+    const orderBlocks = this.findOrderBlocks(history);
+    const regime = this.analyzeRegime(history);
 
-    let extremeFactor;
-    let expectedDirection;
-    let referenceLevel;
-    let referenceStrength;
-    let distanceToLevel;
+    // --- Indicateurs techniques avancés ---
+    const prices5m = this.candlePrices(this.candleMap5m, key);
+    const prices15m = this.candlePrices(this.candleMap15m, key);
+    const candles1m = this.candleMap1m.get(key) || [];
+    const candlePatterns = this.detectCandlestickPatterns(candles1m);
+    const patternSignal = this.getPatternSignal(candlePatterns);
 
-    if (type === 'BOOM') {
-      referenceLevel = nearestSupport?.price ?? null;
-      referenceStrength = nearestSupport?.strength ?? 0;
+    const isBoom = type === 'BOOM';
+    const isUp = isBoom;
+    const expectedDirection = isUp ? 'up' : 'down';
+    const refLevel = isBoom
+      ? (nearestSupport?.price ?? Math.min(...history.slice(-20)))
+      : (nearestResistance?.price ?? Math.max(...history.slice(-20)));
+    const refStrength = isBoom
+      ? (nearestSupport?.strength ?? 1)
+      : (nearestResistance?.strength ?? 1);
 
-      if (referenceLevel === null) {
-        referenceLevel = Math.min(...history.slice(-20));
-        referenceStrength = 1;
-      }
+    // --- Seuils dynamiques par indice (volatilité relative) ---
+    const avgPrice = (currentPrice + refLevel) / 2 || currentPrice;
+    const atrRatio = avgPrice > 0 ? vol / avgPrice : 0.001;
+    const volScale = Math.max(atrRatio / 0.0005, 0.5); // ATR de référence ~0.05%
 
-      distanceToLevel = Math.abs(currentPrice - referenceLevel);
-      const maxDistance = referenceLevel * 0.015;
-      const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
-      extremeFactor = Math.min(proximity, 1);
-      expectedDirection = 'up';
+    const maxDistPct = isBoom
+      ? Math.min(0.025 * volScale, 0.05)
+      : Math.min(0.025 * volScale, 0.05);
+    const maxDistance = avgPrice * maxDistPct;
+    const distanceToLevel = Math.abs(currentPrice - refLevel);
+    const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
+    const extremeFactor = Math.min(proximity, 1);
 
-      if (currentPrice < referenceLevel) {
-        extremeFactor = Math.max(0, extremeFactor * 0.2);
-      }
-    } else {
-      referenceLevel = nearestResistance?.price ?? null;
-      referenceStrength = nearestResistance?.strength ?? 0;
-
-      if (referenceLevel === null) {
-        referenceLevel = Math.max(...history.slice(-20));
-        referenceStrength = 1;
-      }
-
-      distanceToLevel = Math.abs(currentPrice - referenceLevel);
-      const maxDistance = referenceLevel * 0.015;
-      const proximity = Math.max(0, 1 - distanceToLevel / maxDistance);
-      extremeFactor = Math.min(proximity, 1);
-      expectedDirection = 'down';
-
-      if (currentPrice > referenceLevel) {
-        extremeFactor = Math.max(0, extremeFactor * 0.2);
-      }
+    if ((isBoom && currentPrice < refLevel) || (!isBoom && currentPrice > refLevel)) {
+      extremeFactor = Math.max(0, extremeFactor * 0.2);
     }
 
+    // --- Momentum (mouvements consécutifs vers S/R) ---
     const recentMoves = history.slice(-15).map((p, i, arr) => (i > 0 ? p - arr[i - 1] : 0)).slice(1);
-    const consecutive = recentMoves.slice(-5).filter(m => (type === 'BOOM' ? m < 0 : m > 0)).length;
+    const consecutive = recentMoves.slice(-5).filter(m => (isBoom ? m < 0 : m > 0)).length;
     const momentumFactor = Math.min(consecutive / 5, 1);
 
-    // Approche predictive : est-ce que le prix se dirige vers le niveau S/R ?
+    // --- Approche prédictive avancée (velocity + divergence) ---
     let isApproaching = false;
-    if (referenceLevel) {
-      const recent = history.slice(-6);
+    let approachVelocity = 0;
+    if (refLevel) {
+      const recent = history.slice(-10);
       let towardCount = 0;
       for (let i = 1; i < recent.length; i++) {
-        const levelAbove = referenceLevel > currentPrice;
+        const levelAbove = refLevel > currentPrice;
         const movingToward = levelAbove ? recent[i] > recent[i - 1] : recent[i] < recent[i - 1];
         if (movingToward) towardCount++;
       }
-      isApproaching = towardCount >= 3;
+      // Vitesse d'approche (pente des 8 dernières ticks)
+      const slice = history.slice(-8);
+      const slope = (slice[slice.length - 1] - slice[0]) / slice.length;
+      approachVelocity = Math.abs(slope) / (avgPrice || 1) / volScale;
+      // Divergence : le prix approche mais RSI ne suit pas
+      const rsiRecent = this.calculateRSI(history.slice(-30));
+      const rsiDivergence = (isBoom && rsiRecent < 40) || (!isBoom && rsiRecent > 60);
+      isApproaching = (towardCount >= 3 || approachVelocity > 0.3) || (towardCount >= 2 && rsiDivergence);
     }
 
+    // --- Scoring ---
+    const strengthBonus = Math.min(refStrength / 5, 1) * 0.08;
     const msSinceLastSpike = Date.now() - st.lastSpikeTime;
-    const timeFactor = Math.min(msSinceLastSpike / 30000, 1);
+    const timeFactor = Math.min(msSinceLastSpike / 60000, 1);
 
-    const strengthBonus = Math.min(referenceStrength / 5, 1) * 0.08;
-    const spikeProbability = Math.min((extremeFactor * 0.40 + momentumFactor * 0.15 + timeFactor * 0.05 + strengthBonus) * 100, 95);
+    let score = 0;
+    score += extremeFactor * 0.35;
+    score += momentumFactor * 0.12;
+    score += timeFactor * 0.05;
+    score += strengthBonus;
 
+    // Bonus indicateurs techniques
+    let indicatorBonus = 0;
+    if (isBoom && market.trend === 'uptrend') indicatorBonus += 0.06;
+    else if (!isBoom && market.trend === 'downtrend') indicatorBonus += 0.06;
+    else if (market.trend === 'ranging') indicatorBonus += 0.03;
+    if (isBoom && market.liquiditySwept && market.lastBreakout === 'bullish') indicatorBonus += 0.05;
+    else if (!isBoom && market.liquiditySwept && market.lastBreakout === 'bearish') indicatorBonus += 0.05;
+    if (isBoom && rsiVal < 25) indicatorBonus += 0.04;
+    else if (!isBoom && rsiVal > 75) indicatorBonus += 0.04;
+
+    if (orderBlocks.length > 0) {
+      const nearOB = Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.005;
+      if (nearOB && ((isBoom && orderBlocks[0].type === 'bullish') || (!isBoom && orderBlocks[0].type === 'bearish'))) {
+        indicatorBonus += 0.05;
+      }
+    }
+    if (regime.market === 'trending_bull' && isBoom) indicatorBonus += 0.04;
+    else if (regime.market === 'trending_bear' && !isBoom) indicatorBonus += 0.04;
+    else if (regime.market === 'volatile') indicatorBonus += 0.02;
+
+    if ((isBoom && patternSignal.signal === 'bullish') || (!isBoom && patternSignal.signal === 'bearish')) {
+      indicatorBonus += Math.min(patternSignal.score / 20, 0.04);
+    }
+
+    score = Math.min(score + indicatorBonus, 1);
+
+    // --- Confirmation multi-TF ---
+    let multiTFconfirm = 0;
+    if (prices5m.length > 10) {
+      const rsi5m = this.calculateRSI(prices5m);
+      const market5m = this.analyzeMarketStructure(prices5m);
+      const { nearestSupport: s5, nearestResistance: r5 } = this.findSupportResistance(prices5m, currentPrice);
+      const ref5m = isBoom ? (s5?.price ?? Math.min(...prices5m.slice(-20))) : (r5?.price ?? Math.max(...prices5m.slice(-20)));
+      const str5m = isBoom ? (s5?.strength ?? 1) : (r5?.strength ?? 1);
+      const dist5m = Math.abs(currentPrice - ref5m);
+      const prox5m = Math.max(0, 1 - dist5m / (avgPrice * maxDistPct));
+      const momentum5m = prices5m.slice(-5).filter((p, i, arr) => i > 0 && (isBoom ? p < arr[i - 1] : p > arr[i - 1])).length;
+      const score5m = prox5m * 0.35 + Math.min(momentum5m / 5, 1) * 0.12 + Math.min(str5m / 5, 1) * 0.08;
+      if (score5m > 0.5) multiTFconfirm += 6;
+      else multiTFconfirm -= 4;
+    }
+    if (prices15m.length > 10) {
+      const rsi15m = this.calculateRSI(prices15m);
+      const market15m = this.analyzeMarketStructure(prices15m);
+      const { nearestSupport: s15, nearestResistance: r15 } = this.findSupportResistance(prices15m, currentPrice);
+      const ref15m = isBoom ? (s15?.price ?? Math.min(...prices15m.slice(-20))) : (r15?.price ?? Math.max(...prices15m.slice(-20)));
+      const str15m = isBoom ? (s15?.strength ?? 1) : (r15?.strength ?? 1);
+      const dist15m = Math.abs(currentPrice - ref15m);
+      const prox15m = Math.max(0, 1 - dist15m / (avgPrice * maxDistPct));
+      const score15m = prox15m * 0.35 + Math.min(str15m / 5, 1) * 0.08;
+      if (score15m > 0.5) multiTFconfirm += 4;
+      else multiTFconfirm -= 3;
+    }
+
+    let probability = Math.min(Math.max(score * 100 + multiTFconfirm, 20), 97);
+
+    // --- Seuils de signal ajustés par volatilité ---
+    const signalThresholdBuy = isBoom ? (volScale > 1.5 ? 78 : 82) : 75;
+    const signalThresholdSell = !isBoom ? (volScale > 1.5 ? 78 : 82) : 75;
+    const strongThreshold = 86;
+
+    const levelTouched = this.checkLevelTouched(history, currentPrice, isBoom, nearestSupport, nearestResistance);
+    const isSpikeImminent = probability >= (volScale > 1.5 ? 72 : 75) && (levelTouched || isApproaching);
+
+    // --- Ampleur estimée ---
     const lookback = Math.min(history.length, 100);
     const recentHigh = Math.max(...history.slice(-lookback));
     const recentLow = Math.min(...history.slice(-lookback));
     const recentRange = currentPrice > 0 ? (recentHigh - recentLow) / currentPrice : 0.005;
-    const estimatedMagnitude = ((0.015 + extremeFactor * 0.05) * (recentRange / 0.005) * 100).toFixed(1);
-    const isUp = expectedDirection === 'up';
-    const predictive = isApproaching;
-    let entryPrice;
+    const magnitudePct = (0.008 + score * 0.04) * (recentRange / 0.005) * volScale;
+    const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
+
+    // --- Points d'entrée/SL/TP ---
+    const predictive = isApproaching && !levelTouched;
+    let entryLevel;
     if (predictive) {
-      entryPrice = isUp
-        ? currentPrice * 0.998
-        : currentPrice * 1.002;
+      entryLevel = isBoom ? currentPrice * 0.998 : currentPrice * 1.002;
     } else {
-      entryPrice = isUp
+      entryLevel = isBoom
         ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
         : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
     }
-    const slBuffer = Math.max(atr * 0.6, currentPrice * 0.003);
-    const tpBuffer = Math.max(atr * 1.8, currentPrice * 0.008);
-    const stopLoss = isUp
-      ? (predictive ? entryPrice * 0.998 : Math.min(entryPrice * 0.996, entryPrice - slBuffer))
-      : (predictive ? entryPrice * 1.002 : Math.max(entryPrice * 1.004, entryPrice + slBuffer));
-    const tpTarget = predictive ? atr * 1.2 : atr * 0.8;
-    const takeProfit = isUp
-      ? Math.max(entryPrice + tpTarget, currentPrice + tpTarget)
-      : Math.min(entryPrice - tpTarget, currentPrice - tpTarget);
 
-    const signal = isUp ? (spikeProbability >= 85 ? 'STRONG_BUY' : spikeProbability >= 75 ? 'BUY' : 'WATCH') : (spikeProbability >= 85 ? 'STRONG_SELL' : spikeProbability >= 75 ? 'SELL' : 'WATCH');
+    const slMult = regime.market === 'volatile' ? 0.8 : regime.market === 'calm' ? 0.4 : 0.6;
+    const tpMult = regime.market === 'volatile' ? 2.2 : regime.market === 'calm' ? 1.4 : 1.8;
+    const slBuffer = Math.max(vol * slMult, currentPrice * 0.003);
+    const tpBuffer = vol * tpMult;
+
+    const stopLoss = isBoom
+      ? (predictive ? entryLevel * 0.998 : Math.min(entryLevel * 0.996, entryLevel - slBuffer))
+      : (predictive ? entryLevel * 1.002 : Math.max(entryLevel * 1.004, entryLevel + slBuffer));
+
+    const tpTarget = predictive ? vol * 1.2 : vol * 0.8;
+    const takeProfit = isBoom
+      ? Math.max(entryLevel + tpTarget, currentPrice + tpTarget)
+      : Math.min(entryLevel - tpTarget, currentPrice - tpTarget);
+
+    const signal = isBoom
+      ? (probability >= strongThreshold ? 'STRONG_BUY' : probability >= signalThresholdBuy ? 'BUY' : 'WATCH')
+      : (probability >= strongThreshold ? 'STRONG_SELL' : probability >= signalThresholdSell ? 'SELL' : 'WATCH');
+
+    const pricePos = nearestSupport && nearestResistance
+      ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
+      : 50;
+
+    const bestRef = orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01
+      ? { level: orderBlocks[0].price, strength: orderBlocks[0].strength }
+      : { level: refLevel, strength: refStrength };
 
     return {
       type,
       number: num,
       currentPrice,
-      spikeProbability: Math.round(spikeProbability),
+      spikeProbability: Math.round(probability),
       expectedDirection,
-      estimatedMagnitude: `${estimatedMagnitude}%`,
+      estimatedMagnitude: magnitudeStr,
       timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-      isSpikeImminent: spikeProbability > 70,
+      isSpikeImminent,
+      levelTouched,
       isApproaching,
-      pricePosition: nearestSupport && nearestResistance
-        ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
-        : 50,
+      approachVelocity: Math.round(approachVelocity * 100) / 100,
+      pricePosition: pricePos,
       consecutiveMoves: consecutive,
       rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
       rangeHigh: nearestResistance?.price ?? currentPrice * 1.02,
-      referenceLevel,
-      referenceStrength,
-      distancePercent: Math.round((distanceToLevel / (referenceLevel || currentPrice)) * 10000) / 100,
-      sRlevels: allLevels.slice(0, 6).map(l => ({
-        price: Math.round(l.price * 100) / 100,
-        strength: l.strength,
-        type: l.type,
-      })),
-      entryPrice: Math.round(entryPrice * 100) / 100,
+      referenceLevel: Math.round(bestRef.level * 100) / 100,
+      referenceStrength: bestRef.strength,
+      distancePercent: Math.round(Math.abs(currentPrice - bestRef.level) / (bestRef.level || currentPrice) * 10000) / 100,
+      sRlevels: allLevels.slice(0, 6).map(l => ({ price: Math.round(l.price * 100) / 100, strength: l.strength, type: l.type })),
+      orderBlocks: orderBlocks.slice(0, 4).map(ob => ({ price: Math.round(ob.price * 100) / 100, type: ob.type, strength: ob.strength })),
+      upScore: Math.round(score * 100),
+      downScore: Math.round((1 - score) * 100),
+      regime: { volatility: regime.volatility, market: regime.market, recommendation: regime.recommendation },
+      candlePatterns: candlePatterns.slice(0, 3).map(p => ({ name: p.name, signal: p.signal, strength: p.strength })),
+      entryPrice: Math.round(entryLevel * 100) / 100,
       stopLoss: Math.round(stopLoss * 100) / 100,
       takeProfit: Math.round(takeProfit * 100) / 100,
       signal,
       connected: st.connected,
       timestamp: Date.now(),
+      volScale: Math.round(volScale * 100) / 100,
     };
+  }
+
+  checkLevelTouched(history, currentPrice, isBoom, nearestSupport, nearestResistance) {
+    const touchThreshold = 0.0008;
+    const touchWindow = Math.min(history.length, 40);
+    if (isBoom && nearestSupport) {
+      for (let i = history.length - touchWindow; i < history.length; i++) {
+        if (Math.abs(history[i] - nearestSupport.price) / nearestSupport.price < touchThreshold) return true;
+      }
+    } else if (!isBoom && nearestResistance) {
+      for (let i = history.length - touchWindow; i < history.length; i++) {
+        if (Math.abs(history[i] - nearestResistance.price) / nearestResistance.price < touchThreshold) return true;
+      }
+    }
+    return false;
   }
 
   predictNextTick(type, num) {
@@ -514,6 +655,140 @@ class DerivLiveService {
     return (slice[slice.length - 1] - slice[0]) / slice[0];
   }
 
+  calculateRSI(prices, period = 14) {
+    if (prices.length < period + 1) return 50;
+    const recent = prices.slice(-period - 1);
+    let gains = 0, losses = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const diff = recent[i] - recent[i - 1];
+      if (diff > 0) gains += diff;
+      else losses -= diff;
+    }
+    if (losses === 0) return 100;
+    return 100 - 100 / (1 + gains / losses);
+  }
+
+  findPivots(prices, lookback = 3) {
+    const pivots = [];
+    for (let i = lookback; i < prices.length - lookback; i++) {
+      const curr = prices[i];
+      const left = prices.slice(i - lookback, i);
+      const right = prices.slice(i + 1, i + lookback + 1);
+      const isHigh = left.every(p => curr > p) && right.every(p => curr > p);
+      const isLow = left.every(p => curr < p) && right.every(p => curr < p);
+      if (isHigh) {
+        const existing = pivots.find(p => p.isHigh && Math.abs(p.price - curr) / curr < 0.002);
+        if (existing) { existing.strength++; existing.price = (existing.price + curr) / 2; }
+        else pivots.push({ price: curr, isHigh: true, strength: 1 });
+      }
+      if (isLow) {
+        const existing = pivots.find(p => !p.isHigh && Math.abs(p.price - curr) / curr < 0.002);
+        if (existing) { existing.strength++; existing.price = (existing.price + curr) / 2; }
+        else pivots.push({ price: curr, isHigh: false, strength: 1 });
+      }
+    }
+    return pivots;
+  }
+
+  analyzeMarketStructure(prices) {
+    const recent = prices.slice(-60);
+    if (recent.length < 20) return { trend: 'ranging', lastBreakout: null, liquiditySwept: false, imbalance: 0 };
+    const pivots = this.findPivots(recent, 5);
+    const highs = pivots.filter(p => p.isHigh).sort((a, b) => b.price - a.price);
+    const lows = pivots.filter(p => !p.isHigh).sort((a, b) => a.price - b.price);
+    const higherHigh = highs.length >= 2 && highs[0].price > highs[1].price;
+    const higherLow = lows.length >= 2 && lows[0].price > lows[1].price;
+    const lowerHigh = highs.length >= 2 && highs[0].price < highs[1].price;
+    const lowerLow = lows.length >= 2 && lows[0].price < lows[1].price;
+    let trend = 'ranging';
+    if (higherHigh && higherLow) trend = 'uptrend';
+    else if (lowerHigh && lowerLow) trend = 'downtrend';
+    const currentPrice = recent[recent.length - 1];
+    const lastHigh = highs[0]?.price ?? currentPrice;
+    const lastLow = lows[0]?.price ?? currentPrice;
+    const liquiditySwept = currentPrice > lastHigh * 1.001 || currentPrice < lastLow * 0.999;
+    const shortAvg = prices.slice(-10).reduce((a, b) => a + b, 0) / 10;
+    const longAvg = prices.slice(-40).reduce((a, b) => a + b, 0) / 40;
+    const imbalance = (shortAvg - longAvg) / longAvg;
+    return { trend, lastBreakout: liquiditySwept ? (currentPrice > lastHigh ? 'bullish' : 'bearish') : null, liquiditySwept, imbalance };
+  }
+
+  findOrderBlocks(prices) {
+    const blocks = [];
+    const recent = prices.slice(-200);
+    if (recent.length < 30) return blocks;
+    const avgMove = this.calculateATR(recent) / (recent.reduce((a, b) => a + b, 0) / recent.length);
+    const bodyThreshold = Math.max(avgMove * 1.5, 0.0008);
+    for (let i = 5; i < recent.length - 5; i++) {
+      const candle = recent[i], prev = recent[i - 1];
+      const next1 = recent[i + 1], next2 = recent[i + 2], next3 = recent[i + 3];
+      const change = candle - prev;
+      const bodySize = Math.abs(change) / candle;
+      if (bodySize < bodyThreshold) continue;
+      const low = Math.min(candle, prev), high = Math.max(candle, prev);
+      if (change < 0 && next1 > candle && next2 > candle && next3 > candle) {
+        const existing = blocks.find(b => b.type === 'bullish' && Math.abs(b.price - low) / (low || 1) < 0.002);
+        if (existing) { existing.strength++; existing.price = (existing.price * (existing.strength - 1) + low) / existing.strength; }
+        else blocks.push({ price: low, type: 'bullish', strength: 1, rangeLow: low, rangeHigh: high });
+      }
+      if (change > 0 && next1 < candle && next2 < candle && next3 < candle) {
+        const existing = blocks.find(b => b.type === 'bearish' && Math.abs(b.price - high) / (high || 1) < 0.002);
+        if (existing) { existing.strength++; existing.price = (existing.price * (existing.strength - 1) + high) / existing.strength; }
+        else blocks.push({ price: high, type: 'bearish', strength: 1, rangeLow: low, rangeHigh: high });
+      }
+    }
+    return blocks.sort((a, b) => b.strength - a.strength).slice(0, 6);
+  }
+
+  analyzeRegime(prices) {
+    if (prices.length < 50) return { volatility: 'medium', market: 'ranging', adx: 25, recommendation: 'Données insuffisantes' };
+    const atr14 = this.calculateATR(prices, 14);
+    const atr50 = this.calculateATR(prices, 50);
+    const volatility = atr50 > 0 ? (atr14 / atr50 > 1.5 ? 'high' : atr14 / atr50 < 0.7 ? 'low' : 'medium') : 'medium';
+    const trendStrength = this.calculateMomentum(prices, 40);
+    let market, recommendation;
+    if (Math.abs(trendStrength) > 0.02 && atr14 > 0) {
+      market = trendStrength > 0 ? 'trending_bull' : 'trending_bear';
+      recommendation = market === 'trending_bull' ? 'Tendance haussière' : 'Tendance baissière';
+    } else if (volatility === 'high') {
+      market = 'volatile';
+      recommendation = 'Volatilité élevée, stops larges';
+    } else if (atr14 / (atr50 || 1) < 0.7) {
+      market = 'calm';
+      recommendation = 'Marché calme, attendre';
+    } else {
+      market = 'ranging';
+      recommendation = 'Range, scalping recommandé';
+    }
+    return { volatility, market, adx: Math.round(atr14 * 1000) / 100, recommendation };
+  }
+
+  detectCandlestickPatterns(candles) {
+    if (candles.length < 3) return [];
+    const patterns = [];
+    const curr = candles[candles.length - 1];
+    const prev = candles[candles.length - 2];
+    const body = Math.abs(curr.close - curr.open);
+    const range = curr.high - curr.low;
+    if (range > 0 && body / range < 0.001) patterns.push({ name: 'Doji', signal: 'neutral', strength: 1 });
+    const lowerWick = Math.min(curr.open, curr.close) - curr.low;
+    const upperWick = curr.high - Math.max(curr.open, curr.close);
+    if (range > 0 && body < range * 0.3 && lowerWick > body * 2 && upperWick < body * 0.5) patterns.push({ name: 'Hammer', signal: 'bullish', strength: 3 });
+    if (range > 0 && body < range * 0.3 && upperWick > body * 2 && lowerWick < body * 0.5) patterns.push({ name: 'Shooting Star', signal: 'bearish', strength: 3 });
+    if (prev.close < prev.open && curr.close > curr.open && curr.open < prev.close && curr.close > prev.open) patterns.push({ name: 'Bullish Engulfing', signal: 'bullish', strength: 3 });
+    if (prev.close > prev.open && curr.close < curr.open && curr.open > prev.close && curr.close < prev.open) patterns.push({ name: 'Bearish Engulfing', signal: 'bearish', strength: 3 });
+    return patterns;
+  }
+
+  getPatternSignal(patterns) {
+    let score = 0;
+    for (const p of patterns) {
+      if (p.signal === 'bullish') score += p.strength;
+      else if (p.signal === 'bearish') score -= p.strength;
+    }
+    return { signal: score > 2 ? 'bullish' : score < -2 ? 'bearish' : 'neutral', score };
+  }
+
   async generateSignal(type, num) {
     const prediction = this.predictSpike(type, num);
     if (prediction.error || !prediction.isSpikeImminent) return null;
@@ -524,21 +799,21 @@ class DerivLiveService {
     const atr = this.calculateATR(history);
     const atrRatio = atr / (prediction.currentPrice || 1);
 
-    // Improved feature extraction with new indicators
+    // Features enrichies depuis les nouveaux indicateurs de predictSpike
+    const regime = prediction.regime || {};
     const features = {
-      rsi: prediction.spikeProbability > 50 ? (prediction.expectedDirection === 'up' ? 20 : 80) : 50,
+      rsi: this.calculateRSI(history),
       atr_ratio: atrRatio,
-      volume: st.history.length > 100 ? (st.history.slice(-100).reduce((a, b) => a + b, 0) / st.history.slice(-100).length) / (prediction.currentPrice || 1) : 0.5,
-      price_position: prediction.pricePosition / 100,
-      consecutive_moves: prediction.consecutiveMoves / 10,
+      price_position: (prediction.pricePosition || 50) / 100,
+      consecutive_moves: (prediction.consecutiveMoves || 0) / 10,
       time_since_spike: Math.min((prediction.timeSinceLastSpike || 999) / 100, 1),
       momentum: this.calculateMomentum(history),
-      sr_distance: prediction.distancePercent / 100,
+      sr_distance: (prediction.distancePercent || 50) / 100,
       mfi: this.calculateMFI(history) / 100,
       macd_histogram: 0.5,
       bollinger_bandwidth: 0.5,
-      adx: 0.5,
-      trend_strength: 0.5,
+      adx: regime.adx ? Math.min(regime.adx / 100, 1) : 0.5,
+      trend_strength: prediction.downScore > prediction.upScore ? -0.5 : 0.5,
       vwap_distance: 0.5,
       stoch_rsi: 0.5,
     };
@@ -553,15 +828,15 @@ class DerivLiveService {
       const { mlService } = await import('./mlPrediction.js');
       if (mlService.ready) {
         const featArray = [
-          features.rsi, features.atr_ratio, features.volume,
-          features.price_position, features.consecutive_moves,
-          features.time_since_spike, features.momentum,
-          features.sr_distance, features.mfi, features.macd_histogram,
-          features.bollinger_bandwidth, features.adx, features.trend_strength,
+          features.rsi, features.atr_ratio, features.price_position,
+          features.consecutive_moves, features.time_since_spike,
+          features.momentum, features.sr_distance, features.mfi,
+          features.macd_histogram, features.bollinger_bandwidth,
+          features.adx, features.trend_strength,
           features.vwap_distance, features.stoch_rsi,
         ];
         const mlResult = mlService.predict(featArray);
-        const mlTotal = mlResult.up + mlResult.down + mlResult.neutral;
+        const mlTotal = mlResult.up + mlResult.down + mlResult.neutral || 1;
         const mlUpConfidence = mlResult.up / mlTotal;
         const mlDownConfidence = mlResult.down / mlTotal;
 
@@ -570,42 +845,41 @@ class DerivLiveService {
             || (prediction.expectedDirection === 'down' && mlDownConfidence > mlUpConfidence);
 
           if (mlAgrees) {
-            mlBoost = Math.max(mlUpConfidence, mlDownConfidence) * 20;
+            mlBoost = Math.max(mlUpConfidence, mlDownConfidence) * 25;
           } else {
-            mlBoost = -Math.max(mlUpConfidence, mlDownConfidence) * 15;
+            mlBoost = -Math.max(mlUpConfidence, mlDownConfidence) * 20;
           }
 
           const topMl = mlUpConfidence > mlDownConfidence ? 'up' : 'down';
-          if (topMl !== prediction.expectedDirection && Math.max(mlUpConfidence, mlDownConfidence) > 0.8) {
+          if (topMl !== prediction.expectedDirection && Math.max(mlUpConfidence, mlDownConfidence) > 0.7) {
             mlDirection = topMl;
-            mlBoost = Math.max(mlUpConfidence, mlDownConfidence) * 10;
+            mlBoost = Math.max(mlUpConfidence, mlDownConfidence) * 18;
           }
         }
       }
 
-      // Ensemble ML models
       const { ensembleML } = await import('./ensembleML.js');
       if (ensembleML.ready) {
         const ensembleFeatArray = [
-          features.rsi, features.atr_ratio, features.volume,
-          features.price_position, features.consecutive_moves,
-          features.time_since_spike, features.momentum,
-          features.sr_distance, features.mfi, features.macd_histogram,
-          features.bollinger_bandwidth, features.adx, features.trend_strength,
+          features.rsi, features.atr_ratio, features.price_position,
+          features.consecutive_moves, features.time_since_spike,
+          features.momentum, features.sr_distance, features.mfi,
+          features.macd_histogram, features.bollinger_bandwidth,
+          features.adx, features.trend_strength,
           features.vwap_distance, features.stoch_rsi,
         ];
         const ensembleResult = ensembleML.predict(ensembleFeatArray);
-        if (ensembleResult.source === 'ensemble_ml' && ensembleResult.confidence > 0.4) {
-          const ensembleTotal = ensembleResult.up + ensembleResult.down + ensembleResult.neutral;
+        if (ensembleResult.source === 'ensemble_ml' && ensembleResult.confidence > 0.35) {
+          const ensembleTotal = ensembleResult.up + ensembleResult.down + ensembleResult.neutral || 1;
           const ensembleUpConf = ensembleResult.up / ensembleTotal;
           const ensembleDownConf = ensembleResult.down / ensembleTotal;
           const ensembleAgrees = (mlDirection === 'up' && ensembleUpConf > ensembleDownConf)
             || (mlDirection === 'down' && ensembleDownConf > ensembleUpConf);
 
           if (ensembleAgrees) {
-            ensembleBoost = Math.max(ensembleUpConf, ensembleDownConf) * 15;
+            ensembleBoost = Math.max(ensembleUpConf, ensembleDownConf) * 20;
           } else {
-            ensembleBoost = -Math.max(ensembleUpConf, ensembleDownConf) * 10;
+            ensembleBoost = -Math.max(ensembleUpConf, ensembleDownConf) * 15;
           }
         }
       }
@@ -613,32 +887,24 @@ class DerivLiveService {
 
     probability = Math.min(Math.max(probability + mlBoost + ensembleBoost, 0), 99);
 
-    const dynamicSLMultiplier = type === 'BOOM' ? 1.5 : 1.5;
-    const dynamicTPMultiplier = type === 'BOOM' ? 2.5 : 2.5;
-    const slDistance = Math.max(atr * dynamicSLMultiplier, prediction.currentPrice * 0.005);
-    const tpDistance = atr * dynamicTPMultiplier;
-
-    let upScore = mlDirection === 'up' ? probability : 100 - probability;
-    let downScore = mlDirection === 'down' ? probability : 100 - probability;
+    const upScore = mlDirection === 'up' ? probability : 100 - probability;
+    const downScore = mlDirection === 'down' ? probability : 100 - probability;
     const signal = upScore > downScore ? 'STRONG_BUY' : 'STRONG_SELL';
-
-    const entryPrice = prediction.currentPrice;
-    const stopLoss = signal === 'STRONG_BUY' ? entryPrice - slDistance : entryPrice + slDistance;
-    const takeProfit = signal === 'STRONG_BUY' ? entryPrice + tpDistance : entryPrice - tpDistance;
 
     return {
       ...prediction,
       spikeProbability: Math.round(probability),
       expectedDirection: mlDirection,
       signal,
-      entryPrice: Math.round(entryPrice * 100) / 100,
-      stopLoss: Math.round(stopLoss * 100) / 100,
-      takeProfit: Math.round(takeProfit * 100) / 100,
+      entryPrice: Math.round(prediction.entryPrice * 100) / 100,
+      stopLoss: Math.round(prediction.stopLoss * 100) / 100,
+      takeProfit: Math.round(prediction.takeProfit * 100) / 100,
       upScore: Math.round(upScore),
       downScore: Math.round(downScore),
       mlBoost: Math.round(mlBoost),
       ensembleBoost: Math.round(ensembleBoost),
-      rsi: features.rsi,
+      rsi: Math.round(features.rsi),
+      regime,
       features,
     };
   }
@@ -675,6 +941,9 @@ class DerivLiveService {
         expectedDirection: prediction.expectedDirection,
         estimatedMagnitude: prediction.estimatedMagnitude,
         isSpikeImminent: prediction.isSpikeImminent,
+        levelTouched: prediction.levelTouched,
+        isApproaching: prediction.isApproaching,
+        approachVelocity: prediction.approachVelocity,
         timeSinceLastSpike: prediction.timeSinceLastSpike,
         pricePosition: prediction.pricePosition,
         consecutiveMoves: prediction.consecutiveMoves,
@@ -682,6 +951,15 @@ class DerivLiveService {
         referenceStrength: prediction.referenceStrength,
         distancePercent: prediction.distancePercent,
         sRlevels: prediction.sRlevels,
+        orderBlocks: prediction.orderBlocks,
+        upScore: prediction.upScore,
+        downScore: prediction.downScore,
+        regime: prediction.regime,
+        candlePatterns: prediction.candlePatterns,
+        entryPrice: prediction.entryPrice,
+        stopLoss: prediction.stopLoss,
+        takeProfit: prediction.takeProfit,
+        volScale: prediction.volScale,
         connected: prediction.connected,
         timestamp: prediction.timestamp,
       });

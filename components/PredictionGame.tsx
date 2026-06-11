@@ -40,6 +40,8 @@ interface DetectedSignal {
   referenceLevel?: number;
   levelTouched?: boolean;
   isApproaching?: boolean;
+  approachVelocity?: number;
+  volScale?: number;
 }
 
 const INDICES: IndexInfo[] = [
@@ -384,11 +386,14 @@ export default function PredictionGame() {
                     <div className="p-2.5 rounded-lg bg-surface-light/50 border border-border text-[10px] text-text-secondary leading-relaxed mb-3">
                       <span className="font-semibold text-text-muted">Raisonnement : </span>
                       {signal.consecutiveMoves !== undefined && (
-                        <>{signal.consecutiveMoves} mouvements consécutifs opposés • </>
+                        <>{signal.consecutiveMoves} moves • </>
                       )}
-                      Distance du niveau S/R : {signal.distancePercent ?? 0}% • 
-                      Force S/R : {signal.referenceStrength ?? 0} touches • 
-                      Dernier spike il y a {signal.timeSinceSpike}s
+                      S/R dist. {signal.distancePercent ?? 0}% • 
+                      Force {signal.referenceStrength ?? 0}t • 
+                      {signal.approachVelocity !== undefined && signal.approachVelocity > 0 && (
+                        <>Vélocité {signal.approachVelocity.toFixed(2)} • </>
+                      )}
+                      Spike -{signal.timeSinceSpike}s
                     </div>
 
                     {signal.sRlevels && signal.sRlevels.length > 0 && (
