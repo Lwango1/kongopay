@@ -15,28 +15,47 @@ const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<FirebaseAuthTypes.User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const checkAdminStatus = async (firebaseUser: FirebaseAuthTypes.User | null) => {
+    if (!firebaseUser) {
+      setIsAdmin(false);
+      return;
+    }
+    try {
+      const token = await firebaseUser.getIdToken();
+      const data = await apiFetch('/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+      setIsAdmin(!!data.isAdmin);
+    } catch {
+      setIsAdmin(false);
+    }
+  };
+
   useEffect(() => {
-    const unsubscribe = auth().onAuthStateChanged(setUser);
-    setLoading(false);
+    const unsubscribe = auth().onAuthStateChanged(async (firebaseUser) => {
+      setUser(firebaseUser);
+      await checkAdminStatus(firebaseUser);
+      setLoading(false);
+    });
     return unsubscribe;
   }, []);
 
   const login = async (email: string, password: string) => {
-    await auth().signInWithEmailAndPassword(email, password);
+    const cred = await auth().signInWithEmailAndPassword(email, password);
+    await checkAdminStatus(cred.user);
   };
 
   const register = async (email: string, password: string, name: string) => {
-    await auth().createUserWithEmailAndPassword(email, password);
-    await auth().currentUser?.updateProfile({ displayName: name });
+    const cred = await auth().createUserWithEmailAndPassword(email, password);
+    await cred.user.updateProfile({ displayName: name });
+    await checkAdminStatus(cred.user);
   };
 
   const logout = async () => {
     await auth().signOut();
+    setIsAdmin(false);
   };
-
-  const isAdmin = user?.email === 'lwangodany@gmail.com';
 
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin, login, register, logout }}>

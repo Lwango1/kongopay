@@ -27,8 +27,24 @@ import signalsRoutes from './routes/signals.js';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", 'https://*.firebaseio.com'],
+      connectSrc: ["'self'", 'wss://ws.binaryws.com', 'https://*.firebaseio.com'],
+      imgSrc: ["'self'", 'data:', 'https:'],
+    },
+  },
+}));
+
+const allowedOrigins = process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'];
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(null, false);
+  },
+}));
 app.use(morgan('dev'));
 app.use(express.json({ limit: '10kb' }));
 app.use('/api/', apiLimiter);
@@ -36,18 +52,18 @@ app.use('/api/', apiLimiter);
 initializeFirebase();
 
 app.use('/api/auth', authLimiter, authRoutes);
-app.use('/api/wallet', walletRoutes);
-app.use('/api/trading', tradingRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/mobile-money', mobileMoneyRoutes);
-app.use('/api/deriv', derivRoutes);
-app.use('/api/p2p', p2pRoutes);
-app.use('/api/kyc', kycRoutes);
-app.use('/api/subscription', subscriptionRoutes);
-app.use('/api/engagement', engagementRoutes);
-app.use('/api/fees', feesRoutes);
-app.use('/api/notifications', notificationsRoutes);
-app.use('/api/signals', signalsRoutes);
+app.use('/api/wallet', authLimiter, walletRoutes);
+app.use('/api/trading', authLimiter, tradingRoutes);
+app.use('/api/admin', authLimiter, adminRoutes);
+app.use('/api/mobile-money', authLimiter, mobileMoneyRoutes);
+app.use('/api/deriv', authLimiter, derivRoutes);
+app.use('/api/p2p', authLimiter, p2pRoutes);
+app.use('/api/kyc', authLimiter, kycRoutes);
+app.use('/api/subscription', authLimiter, subscriptionRoutes);
+app.use('/api/engagement', authLimiter, engagementRoutes);
+app.use('/api/fees', authLimiter, feesRoutes);
+app.use('/api/notifications', authLimiter, notificationsRoutes);
+app.use('/api/signals', authLimiter, signalsRoutes);
 
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', version: '2.0.0', name: 'KongoPay API' });

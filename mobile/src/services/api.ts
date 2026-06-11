@@ -1,7 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import auth from '@react-native-firebase/auth';
 
-const API_BASE = 'http://localhost:3000/api';
+// En production, définir ici https://kongopay.onrender.com/api
+const DEV_API = 'http://localhost:3000/api';
+const PROD_API = 'https://kongopay.onrender.com/api';
+const API_BASE = __DEV__ ? DEV_API : PROD_API;
 
 async function getToken(): Promise<string | null> {
   const user = auth().currentUser;
