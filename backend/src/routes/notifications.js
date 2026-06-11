@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { notificationService } from '../services/notifications.js';
+import { registerToken, unregisterToken } from '../services/pushNotifications.js';
 
 const router = Router();
 
@@ -35,6 +36,26 @@ router.delete('/alerts/:id', authenticate, async (req, res, next) => {
   try {
     const result = await notificationService.deleteAlert(req.params.id, req.user.uid);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/register-token', authenticate, async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ error: 'Token requis' });
+    await registerToken(req.user.uid, token);
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/register-token', authenticate, async (req, res, next) => {
+  try {
+    await unregisterToken(req.user.uid);
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

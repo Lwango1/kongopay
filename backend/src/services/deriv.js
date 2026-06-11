@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import { broadcastSignal } from './pushNotifications.js';
 
 const INDICES = [
   { type: 'BOOM', number: 500, symbol: 'BOOM500' },
@@ -665,12 +666,19 @@ class DerivLiveService {
 
     opportunities.sort((a, b) => b.spikeProbability - a.spikeProbability);
 
+    const imminent = opportunities.filter(o => o.isSpikeImminent);
+    if (imminent.length > 0) {
+      for (const sig of imminent) {
+        broadcastSignal(sig).catch(() => {});
+      }
+    }
+
     return {
       timestamp: Date.now(),
       source: this.wsConnected ? 'deriv-live' : 'disconnected',
       opportunities,
       bestOpportunity: opportunities.length > 0 ? opportunities[0] : null,
-      imminentCount: opportunities.filter(o => o.isSpikeImminent).length,
+      imminentCount: imminent.length,
       totalAnalyzed: opportunities.length,
     };
   }

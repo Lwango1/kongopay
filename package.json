@@ -11,6 +11,7 @@
   "dependencies": {
     "ccxt": "^4.5.56",
     "firebase": "^12.14.0",
+    "firebase-admin": "^14.0.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.510.0",
     "next": "^15.3.0",

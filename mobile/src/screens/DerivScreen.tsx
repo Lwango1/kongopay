@@ -16,6 +16,7 @@ import { COLORS } from '../constants/theme';
 import Card from '../components/ui/Card';
 import { fetchDerivState, fetchSpikePrediction, fetchMarketScan, INDICES } from '../services/deriv';
 import type { DerivState, SpikeMap, MarketScanResult, MarketOpportunity } from '../services/deriv';
+import { registerForPushNotifications, onMessageReceived } from '../services/notifications';
 
 const chartWidth = Dimensions.get('window').width - 48;
 
@@ -103,6 +104,24 @@ export default function DerivScreen() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    registerForPushNotifications();
+    const unsubscribe = onMessageReceived((remoteMessage) => {
+      const data = remoteMessage.data;
+      if (data?.type === 'signal') {
+        Vibration.vibrate(500);
+        const label = `${data.indexType === 'BOOM' ? 'Boom' : 'Crash'} ${data.indexNumber}`;
+        const dir = data.direction === 'up' ? 'Hausse' : 'Baisse';
+        Alert.alert(
+          'Signal détecté !',
+          `${label} — ${dir} imminente (${data.probability}%)`,
+          [{ text: 'Voir', onPress: () => setActiveKey(`${data.indexType}_${data.indexNumber}`) }]
+        );
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
