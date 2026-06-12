@@ -12,6 +12,7 @@ export interface HistoryEntry {
   timeSinceLastSpike: number;
   detectedAt: number;
   expiredAt: number;
+  tpHit?: boolean;
 }
 
 function getDayKey(ts: number): string {
@@ -59,5 +60,22 @@ export function getHistoryForDay(date: Date): HistoryEntry[] {
 export function clearHistory() {
   try {
     localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
+
+export function updateTodayEntriesByKey(key: string, updates: Partial<HistoryEntry>) {
+  try {
+    const all = loadAll();
+    const day = getDayKey(Date.now());
+    const entries = all[day];
+    if (!entries) return;
+    let changed = false;
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].key === key) {
+        entries[i] = { ...entries[i], ...updates };
+        changed = true;
+      }
+    }
+    if (changed) saveAll(all);
   } catch {}
 }

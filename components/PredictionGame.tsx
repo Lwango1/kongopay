@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   Brain, Flame, Droplet, AlertTriangle, BarChart3,
   ExternalLink, Zap, Wifi, WifiOff, Clock,
 } from "lucide-react";
 import type { Signal, IndexType } from "@/lib/deriv";
 import { initDerivClient, getDerivState, predictSpike, setTouchMode, getTouchMode } from "@/lib/deriv";
-import { addToHistory, getTodayHistory } from "@/lib/signalHistory";
+import { addToHistory, getTodayHistory, updateTodayEntriesByKey } from "@/lib/signalHistory";
 import type { HistoryEntry } from "@/lib/signalHistory";
 interface SRLevel {
   price: number;
@@ -56,11 +56,8 @@ const INDICES: IndexInfo[] = [
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
 const MIN_PROBABILITY = 80;
 
-function HistoryView() {
-  const entries = useMemo(() => {
-    const all = getTodayHistory();
-    return all.sort((a, b) => b.detectedAt - a.detectedAt);
-  }, []);
+function HistoryView({ now }: { now: number }) {
+  const entries = getTodayHistory().sort((a, b) => b.detectedAt - a.detectedAt);
 
   if (entries.length === 0) {
     return (
@@ -84,7 +81,8 @@ function HistoryView() {
             <th className="text-right py-2 pr-3 font-semibold">SL</th>
             <th className="text-right py-2 pr-3 font-semibold">TP</th>
             <th className="text-right py-2 pr-3 font-semibold">Ampleur</th>
-            <th className="text-right py-2 font-semibold">Spike</th>
+            <th className="text-right py-2 pr-3 font-semibold">Spike</th>
+            <th className="text-right py-2 font-semibold">TP touché</th>
           </tr>
         </thead>
         <tbody>
@@ -97,6 +95,16 @@ function HistoryView() {
             const spikeStr = spikeMin > 0
               ? `${spikeMin}m ${spikeSec}s`
               : `${spikeSec}s`;
+            const tpHitText = e.tpHit === true
+              ? "Oui"
+              : now > e.expiredAt
+                ? "Non"
+                : "-";
+            const tpHitColor = e.tpHit === true
+              ? "text-success"
+              : now > e.expiredAt
+                ? "text-danger"
+                : "text-text-muted";
             return (
               <tr key={i} className="border-b border-border/50 hover:bg-surface/30 transition-colors">
                 <td className="py-2 pr-3 text-text-muted whitespace-nowrap">{timeStr}</td>
@@ -109,7 +117,8 @@ function HistoryView() {
                 <td className="py-2 pr-3 text-right font-mono text-danger">${e.stopLoss.toFixed(2)}</td>
                 <td className="py-2 pr-3 text-right font-mono text-success">${e.takeProfit.toFixed(2)}</td>
                 <td className="py-2 pr-3 text-right font-mono">{e.magnitude}</td>
-                <td className="py-2 text-right font-mono text-text-muted text-xs">{spikeStr}</td>
+                <td className="py-2 pr-3 text-right font-mono text-text-muted text-xs">{spikeStr}</td>
+                <td className={`py-2 text-right font-mono text-xs font-semibold ${tpHitColor}`}>{tpHitText}</td>
               </tr>
             );
           })}
@@ -194,7 +203,15 @@ export default function PredictionGame() {
           timeSinceLastSpike: p.timeSinceLastSpike ?? 0,
           detectedAt: now,
           expiredAt: now + SIGNAL_EXPIRY_MS,
+          tpHit: undefined,
         });
+
+        const isUp = p.expectedDirection === "up";
+        const currentPrice = p.currentPrice ?? 0;
+        const tp = p.takeProfit ?? 0;
+        if (tp > 0 && ((isUp && currentPrice >= tp) || (!isUp && currentPrice <= tp))) {
+          updateTodayEntriesByKey(k, { tpHit: true });
+        }
       }
 
       setActiveSignals(prev => {
@@ -296,7 +313,7 @@ export default function PredictionGame() {
         )}
 
         {showHistory && (
-          <HistoryView />
+          <HistoryView now={Date.now()} />
         )}
 
         {!showHistory && activeSignals.length > 0 && (
