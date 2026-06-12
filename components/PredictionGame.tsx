@@ -83,7 +83,8 @@ function HistoryView() {
             <th className="text-right py-2 pr-3 font-semibold">Entrée</th>
             <th className="text-right py-2 pr-3 font-semibold">SL</th>
             <th className="text-right py-2 pr-3 font-semibold">TP</th>
-            <th className="text-right py-2 font-semibold">Ampleur</th>
+            <th className="text-right py-2 pr-3 font-semibold">Ampleur</th>
+            <th className="text-right py-2 font-semibold">Spike</th>
           </tr>
         </thead>
         <tbody>
@@ -91,6 +92,11 @@ function HistoryView() {
             const t = new Date(e.detectedAt);
             const timeStr = `${t.getHours().toString().padStart(2, "0")}:${t.getMinutes().toString().padStart(2, "0")}:${t.getSeconds().toString().padStart(2, "0")}`;
             const isUp = e.direction === "up";
+            const spikeMin = Math.floor(e.timeSinceLastSpike / 60);
+            const spikeSec = e.timeSinceLastSpike % 60;
+            const spikeStr = spikeMin > 0
+              ? `${spikeMin}m ${spikeSec}s`
+              : `${spikeSec}s`;
             return (
               <tr key={i} className="border-b border-border/50 hover:bg-surface/30 transition-colors">
                 <td className="py-2 pr-3 text-text-muted whitespace-nowrap">{timeStr}</td>
@@ -102,7 +108,8 @@ function HistoryView() {
                 <td className="py-2 pr-3 text-right font-mono">${e.entryPrice.toFixed(2)}</td>
                 <td className="py-2 pr-3 text-right font-mono text-danger">${e.stopLoss.toFixed(2)}</td>
                 <td className="py-2 pr-3 text-right font-mono text-success">${e.takeProfit.toFixed(2)}</td>
-                <td className="py-2 text-right font-mono">{e.magnitude}</td>
+                <td className="py-2 pr-3 text-right font-mono">{e.magnitude}</td>
+                <td className="py-2 text-right font-mono text-text-muted text-xs">{spikeStr}</td>
               </tr>
             );
           })}
@@ -184,6 +191,7 @@ export default function PredictionGame() {
           stopLoss: p.stopLoss ?? 0,
           takeProfit: p.takeProfit ?? 0,
           magnitude: p.estimatedMagnitude ?? "0%",
+          timeSinceLastSpike: p.timeSinceLastSpike ?? 0,
           detectedAt: now,
           expiredAt: now + SIGNAL_EXPIRY_MS,
         });

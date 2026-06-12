@@ -9,6 +9,7 @@ export interface HistoryEntry {
   stopLoss: number;
   takeProfit: number;
   magnitude: string;
+  timeSinceLastSpike: number;
   detectedAt: number;
   expiredAt: number;
 }
