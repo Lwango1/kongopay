@@ -319,23 +319,39 @@ export default function PredictionGame() {
         {!showHistory && activeSignals.length > 0 && (
           <div className="grid lg:grid-cols-5 gap-6">
             <div className="lg:col-span-2 space-y-2">
-              {activeSignals.map((s) => {
-                const isSel = s.key === selectedSignal;
-                const timeLeft = Math.max(0, SIGNAL_EXPIRY_MS - (Date.now() - s.detectedAt));
-                return (
-                  <button key={s.key} onClick={() => setSelectedSignal(s.key)}
-                    className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-medium transition-all ${isSel ? "bg-surface border border-primary/40 text-text" : "bg-background border border-border text-text-secondary hover:bg-surface"}`}>
-                    <s.index.icon size={18} style={{ color: s.index.color }} />
-                    <div className="flex-1 text-left">
-                      <span className="font-semibold">{s.index.label}</span>
-                      <div className={`text-xs font-medium mt-0.5 ${s.direction === "up" ? "text-success" : "text-danger"}`}>
-                        {s.direction === "up" ? "↑ ACHAT" : "↓ VENTE"} — {s.probability}%
+              {(() => {
+                const todayEntries = getTodayHistory();
+                const reliabilityByKey: Record<string, number> = {};
+                for (const idx of INDICES) {
+                  const k = `${idx.type}_${idx.number}`;
+                  const indexEntries = todayEntries.filter(e => e.key === k && e.tpHit !== undefined);
+                  const hit = indexEntries.filter(e => e.tpHit === true).length;
+                  reliabilityByKey[k] = indexEntries.length > 0 ? Math.round(hit / indexEntries.length * 100) : -1;
+                }
+                return activeSignals.map((s) => {
+                  const isSel = s.key === selectedSignal;
+                  const timeLeft = Math.max(0, SIGNAL_EXPIRY_MS - (Date.now() - s.detectedAt));
+                  const rel = reliabilityByKey[s.key];
+                  return (
+                    <button key={s.key} onClick={() => setSelectedSignal(s.key)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl text-sm font-medium transition-all ${isSel ? "bg-surface border border-primary/40 text-text" : "bg-background border border-border text-text-secondary hover:bg-surface"}`}>
+                      <s.index.icon size={18} style={{ color: s.index.color }} />
+                      <div className="flex-1 text-left">
+                        <span className="font-semibold">{s.index.label}</span>
+                        <div className={`text-xs font-medium mt-0.5 ${s.direction === "up" ? "text-success" : "text-danger"}`}>
+                          {s.direction === "up" ? "↑ ACHAT" : "↓ VENTE"} — {s.probability}%
+                        </div>
+                        {rel >= 0 && (
+                          <div className={`text-[10px] mt-0.5 font-medium ${rel >= 70 ? "text-success" : rel >= 40 ? "text-warning" : "text-danger"}`}>
+                            Fiabilité: {rel}%
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    <span className="text-[10px] text-text-muted">{Math.ceil(timeLeft / 60000)}m</span>
-                  </button>
-                );
-              })}
+                      <span className="text-[10px] text-text-muted">{Math.ceil(timeLeft / 60000)}m</span>
+                    </button>
+                  );
+                });
+              })()}
             </div>
 
             <div className="lg:col-span-3 space-y-4">
