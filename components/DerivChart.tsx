@@ -14,9 +14,9 @@ import { initDerivClient, getDerivState, predictSpike, getCandlesticksByTF } fro
 import type { IndexType, Candlestick } from "@/lib/deriv";
 import { calculateRSI } from "@/lib/indicators";
 
-type TimeFrame = "1m" | "5m" | "15m";
+type TimeFrame = "15m" | "30m" | "1h" | "2h";
 
-const TF_LABELS: Record<TimeFrame, string> = { "1m": "1 min", "5m": "5 min", "15m": "15 min" };
+const TF_LABELS: Record<TimeFrame, string> = { "15m": "15 min", "30m": "30 min", "1h": "1 heure", "2h": "2 heures" };
 
 const INDICES = [
   { type: "BOOM" as IndexType, number: 500, label: "Boom 500", color: "#22c55e" },
@@ -42,7 +42,7 @@ function computeRSIData(candles: Candlestick[]): { time: number; value: number }
 
 export default function DerivChart() {
   const [selectedSymbol, setSelectedSymbol] = useState("BOOM_500");
-  const [timeframe, setTimeframe] = useState<TimeFrame>("1m");
+  const [timeframe, setTimeframe] = useState<TimeFrame>("15m");
   const [fullscreen, setFullscreen] = useState(false);
   const [renderTick, setRenderTick] = useState(0);
 
@@ -101,7 +101,7 @@ export default function DerivChart() {
     const sharedTimeScale = {
       borderColor: "#2d3748",
       timeVisible: true,
-      secondsVisible: timeframe === "1m",
+      secondsVisible: false,
     };
 
     const mainChart = createChart(mainChartRef.current, {
@@ -267,7 +267,7 @@ export default function DerivChart() {
             })}
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden">
-            {(["1m", "5m", "15m"] as TimeFrame[]).map(tf => (
+            {(["15m", "30m", "1h", "2h"] as TimeFrame[]).map(tf => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}

@@ -28,9 +28,10 @@ function keyFromSymbol(symbol) {
 class DerivLiveService {
   constructor() {
     this.stateMap = new Map();
-    this.candleMap1m = new Map();
-    this.candleMap5m = new Map();
     this.candleMap15m = new Map();
+    this.candleMap30m = new Map();
+    this.candleMap60m = new Map();
+    this.candleMap120m = new Map();
     this.priceAt24hAgo = new Map();
     this.ws = null;
     this.wsConnected = false;
@@ -51,17 +52,19 @@ class DerivLiveService {
         lastSpikeDirection: null,
         connected: false,
       });
-      this.candleMap1m.set(key, []);
-      this.candleMap5m.set(key, []);
       this.candleMap15m.set(key, []);
+      this.candleMap30m.set(key, []);
+      this.candleMap60m.set(key, []);
+      this.candleMap120m.set(key, []);
     }
   }
 
   updateCandleMulti(key, price, timeMs) {
     const intervals = [
-      { seconds: 60, map: this.candleMap1m },
-      { seconds: 300, map: this.candleMap5m },
       { seconds: 900, map: this.candleMap15m },
+      { seconds: 1800, map: this.candleMap30m },
+      { seconds: 3600, map: this.candleMap60m },
+      { seconds: 7200, map: this.candleMap120m },
     ];
     for (const { seconds, map } of intervals) {
       const candles = map.get(key);
@@ -365,10 +368,11 @@ class DerivLiveService {
     const regime = this.analyzeRegime(history);
 
     // --- Indicateurs techniques avancés ---
-    const prices5m = this.candlePrices(this.candleMap5m, key);
-    const prices15m = this.candlePrices(this.candleMap15m, key);
-    const candles1m = this.candleMap1m.get(key) || [];
-    const candlePatterns = this.detectCandlestickPatterns(candles1m);
+    const prices30m = this.candlePrices(this.candleMap30m, key);
+    const prices60m = this.candlePrices(this.candleMap60m, key);
+    const prices120m = this.candlePrices(this.candleMap120m, key);
+    const candles15m = this.candleMap15m.get(key) || [];
+    const candlePatterns = this.detectCandlestickPatterns(candles15m);
     const patternSignal = this.getPatternSignal(candlePatterns);
 
     const isBoom = type === 'BOOM';
@@ -463,30 +467,42 @@ class DerivLiveService {
 
     // --- Confirmation multi-TF ---
     let multiTFconfirm = 0;
-    if (prices5m.length > 10) {
-      const rsi5m = this.calculateRSI(prices5m);
-      const market5m = this.analyzeMarketStructure(prices5m);
-      const { nearestSupport: s5, nearestResistance: r5 } = this.findSupportResistance(prices5m, currentPrice);
-      const ref5m = isBoom ? (s5?.price ?? Math.min(...prices5m.slice(-20))) : (r5?.price ?? Math.max(...prices5m.slice(-20)));
-      const str5m = isBoom ? (s5?.strength ?? 1) : (r5?.strength ?? 1);
-      const dist5m = Math.abs(currentPrice - ref5m);
-      const prox5m = Math.max(0, 1 - dist5m / (avgPrice * maxDistPct));
-      const momentum5m = prices5m.slice(-5).filter((p, i, arr) => i > 0 && (isBoom ? p < arr[i - 1] : p > arr[i - 1])).length;
-      const score5m = prox5m * 0.35 + Math.min(momentum5m / 5, 1) * 0.12 + Math.min(str5m / 5, 1) * 0.08;
-      if (score5m > 0.5) multiTFconfirm += 6;
+    if (prices30m.length > 10) {
+      const rsi30m = this.calculateRSI(prices30m);
+      const market30m = this.analyzeMarketStructure(prices30m);
+      const { nearestSupport: s30, nearestResistance: r30 } = this.findSupportResistance(prices30m, currentPrice);
+      const ref30m = isBoom ? (s30?.price ?? Math.min(...prices30m.slice(-20))) : (r30?.price ?? Math.max(...prices30m.slice(-20)));
+      const str30m = isBoom ? (s30?.strength ?? 1) : (r30?.strength ?? 1);
+      const dist30m = Math.abs(currentPrice - ref30m);
+      const prox30m = Math.max(0, 1 - dist30m / (avgPrice * maxDistPct));
+      const momentum30m = prices30m.slice(-5).filter((p, i, arr) => i > 0 && (isBoom ? p < arr[i - 1] : p > arr[i - 1])).length;
+      const score30m = prox30m * 0.35 + Math.min(momentum30m / 5, 1) * 0.12 + Math.min(str30m / 5, 1) * 0.08;
+      if (score30m > 0.5) multiTFconfirm += 6;
       else multiTFconfirm -= 4;
     }
-    if (prices15m.length > 10) {
-      const rsi15m = this.calculateRSI(prices15m);
-      const market15m = this.analyzeMarketStructure(prices15m);
-      const { nearestSupport: s15, nearestResistance: r15 } = this.findSupportResistance(prices15m, currentPrice);
-      const ref15m = isBoom ? (s15?.price ?? Math.min(...prices15m.slice(-20))) : (r15?.price ?? Math.max(...prices15m.slice(-20)));
-      const str15m = isBoom ? (s15?.strength ?? 1) : (r15?.strength ?? 1);
-      const dist15m = Math.abs(currentPrice - ref15m);
-      const prox15m = Math.max(0, 1 - dist15m / (avgPrice * maxDistPct));
-      const score15m = prox15m * 0.35 + Math.min(str15m / 5, 1) * 0.08;
-      if (score15m > 0.5) multiTFconfirm += 4;
+    if (prices60m.length > 10) {
+      const rsi60m = this.calculateRSI(prices60m);
+      const market60m = this.analyzeMarketStructure(prices60m);
+      const { nearestSupport: s60, nearestResistance: r60 } = this.findSupportResistance(prices60m, currentPrice);
+      const ref60m = isBoom ? (s60?.price ?? Math.min(...prices60m.slice(-20))) : (r60?.price ?? Math.max(...prices60m.slice(-20)));
+      const str60m = isBoom ? (s60?.strength ?? 1) : (r60?.strength ?? 1);
+      const dist60m = Math.abs(currentPrice - ref60m);
+      const prox60m = Math.max(0, 1 - dist60m / (avgPrice * maxDistPct));
+      const score60m = prox60m * 0.35 + Math.min(str60m / 5, 1) * 0.08;
+      if (score60m > 0.5) multiTFconfirm += 4;
       else multiTFconfirm -= 3;
+    }
+    if (prices120m.length > 10) {
+      const rsi120m = this.calculateRSI(prices120m);
+      const market120m = this.analyzeMarketStructure(prices120m);
+      const { nearestSupport: s120, nearestResistance: r120 } = this.findSupportResistance(prices120m, currentPrice);
+      const ref120m = isBoom ? (s120?.price ?? Math.min(...prices120m.slice(-20))) : (r120?.price ?? Math.max(...prices120m.slice(-20)));
+      const str120m = isBoom ? (s120?.strength ?? 1) : (r120?.strength ?? 1);
+      const dist120m = Math.abs(currentPrice - ref120m);
+      const prox120m = Math.max(0, 1 - dist120m / (avgPrice * maxDistPct));
+      const score120m = prox120m * 0.35 + Math.min(str120m / 5, 1) * 0.08;
+      if (score120m > 0.5) multiTFconfirm += 3;
+      else multiTFconfirm -= 2;
     }
 
     let probability = Math.min(Math.max(score * 100 + multiTFconfirm, 20), 97);

@@ -69,9 +69,10 @@ function keyFromSymbol(symbol: string): string | null {
 }
 
 const stateMap = new Map<string, IndexState>();
-const candleMap1m = new Map<string, Candlestick[]>();
-const candleMap5m = new Map<string, Candlestick[]>();
 const candleMap15m = new Map<string, Candlestick[]>();
+const candleMap30m = new Map<string, Candlestick[]>();
+const candleMap60m = new Map<string, Candlestick[]>();
+const candleMap120m = new Map<string, Candlestick[]>();
 const priceAt24hAgo = new Map<string, number>();
 
 function initCandleMap(map: Map<string, Candlestick[]>) {
@@ -93,9 +94,10 @@ for (const idx of INDICES) {
     confirmationTriggered: false,
   });
 }
-initCandleMap(candleMap1m);
-initCandleMap(candleMap5m);
 initCandleMap(candleMap15m);
+initCandleMap(candleMap30m);
+initCandleMap(candleMap60m);
+initCandleMap(candleMap120m);
 
 let ws: any = null;
 let wsConnected = false;
@@ -121,9 +123,10 @@ function createWebSocket(url: string): any {
 }
 
 const CANDLE_INTERVALS = [
-  { seconds: 60, map: candleMap1m, label: "1m" },
-  { seconds: 300, map: candleMap5m, label: "5m" },
   { seconds: 900, map: candleMap15m, label: "15m" },
+  { seconds: 1800, map: candleMap30m, label: "30m" },
+  { seconds: 3600, map: candleMap60m, label: "1h" },
+  { seconds: 7200, map: candleMap120m, label: "2h" },
 ];
 
 function updateCandleMulti(key: string, price: number, timeMs: number) {
@@ -643,8 +646,8 @@ export function predictSpike(type: IndexType, num: number) {
     trendStrength = detectTrendStrengthInternal(history);
     regime = analyzeRegimeInternal(history);
     vwap = calculateVWAP(history);
-    const candles1m = candleMap1m.get(key) || [];
-    candlePatterns = detectCandlestickPatterns(candles1m.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close })));
+    const candles15m = candleMap15m.get(key) || [];
+    candlePatterns = detectCandlestickPatterns(candles15m.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close })));
     patternSignal = getPatternSignal(candlePatterns);
   } catch (e) {
     if (!isServer) console.warn("[Deriv] Erreur indicateurs techniques:", e);
@@ -732,28 +735,39 @@ export function predictSpike(type: IndexType, num: number) {
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   let probability = Math.min(Math.max(bestScore * 100, 20), 97);
 
-  // Multi-timeframe confirmation
-  const prices5m = candlePrices(candleMap5m, key);
-  const prices15m = candlePrices(candleMap15m, key);
-  if (prices5m.length > 10) {
-    const rsi5m = rsi(prices5m);
-    const market5m = analyzeMarketStructure(prices5m);
-    const { nearestSupport: s5, nearestResistance: r5 } = findSupportResistance(prices5m, currentPrice);
-    const ref5m = isBoom ? (s5?.price ?? Math.min(...prices5m.slice(-20))) : (r5?.price ?? Math.max(...prices5m.slice(-20)));
-    const str5m = isBoom ? (s5?.strength ?? 1) : (r5?.strength ?? 1);
-    const score5m = scoreSignal(currentPrice, ref5m, str5m, prices5m, isUp, rsi5m, market5m);
-    if (score5m.score > 0.5) probability += 6;
-    else probability -= 5;
+  // Multi-timeframe confirmation (30m, 1h, 2h)
+  const prices30m = candlePrices(candleMap30m, key);
+  const prices60m = candlePrices(candleMap60m, key);
+  const prices120m = candlePrices(candleMap120m, key);
+  if (prices30m.length > 10) {
+    const rsi30m = rsi(prices30m);
+    const market30m = analyzeMarketStructure(prices30m);
+    const { nearestSupport: s30, nearestResistance: r30 } = findSupportResistance(prices30m, currentPrice);
+    const ref30m = isBoom ? (s30?.price ?? Math.min(...prices30m.slice(-20))) : (r30?.price ?? Math.max(...prices30m.slice(-20)));
+    const str30m = isBoom ? (s30?.strength ?? 1) : (r30?.strength ?? 1);
+    const score30m = scoreSignal(currentPrice, ref30m, str30m, prices30m, isUp, rsi30m, market30m);
+    if (score30m.score > 0.5) probability += 6;
+    else probability -= 4;
   }
-  if (prices15m.length > 10) {
-    const rsi15m = rsi(prices15m);
-    const market15m = analyzeMarketStructure(prices15m);
-    const { nearestSupport: s15, nearestResistance: r15 } = findSupportResistance(prices15m, currentPrice);
-    const ref15m = isBoom ? (s15?.price ?? Math.min(...prices15m.slice(-20))) : (r15?.price ?? Math.max(...prices15m.slice(-20)));
-    const str15m = isBoom ? (s15?.strength ?? 1) : (r15?.strength ?? 1);
-    const score15m = scoreSignal(currentPrice, ref15m, str15m, prices15m, isUp, rsi15m, market15m);
-    if (score15m.score > 0.5) probability += 4;
+  if (prices60m.length > 10) {
+    const rsi60m = rsi(prices60m);
+    const market60m = analyzeMarketStructure(prices60m);
+    const { nearestSupport: s60, nearestResistance: r60 } = findSupportResistance(prices60m, currentPrice);
+    const ref60m = isBoom ? (s60?.price ?? Math.min(...prices60m.slice(-20))) : (r60?.price ?? Math.max(...prices60m.slice(-20)));
+    const str60m = isBoom ? (s60?.strength ?? 1) : (r60?.strength ?? 1);
+    const score60m = scoreSignal(currentPrice, ref60m, str60m, prices60m, isUp, rsi60m, market60m);
+    if (score60m.score > 0.5) probability += 4;
     else probability -= 3;
+  }
+  if (prices120m.length > 10) {
+    const rsi120m = rsi(prices120m);
+    const market120m = analyzeMarketStructure(prices120m);
+    const { nearestSupport: s120, nearestResistance: r120 } = findSupportResistance(prices120m, currentPrice);
+    const ref120m = isBoom ? (s120?.price ?? Math.min(...prices120m.slice(-20))) : (r120?.price ?? Math.max(...prices120m.slice(-20)));
+    const str120m = isBoom ? (s120?.strength ?? 1) : (r120?.strength ?? 1);
+    const score120m = scoreSignal(currentPrice, ref120m, str120m, prices120m, isUp, rsi120m, market120m);
+    if (score120m.score > 0.5) probability += 3;
+    else probability -= 2;
   }
   probability = Math.min(Math.max(probability, 0), 97);
 
@@ -1160,12 +1174,12 @@ export function predictNextTick(type: IndexType, num: number) {
 }
 
 export function getCandlesticks(type: IndexType, num: number): Candlestick[] {
-  return candleMap1m.get(getKey(type, num)) || [];
+  return candleMap15m.get(getKey(type, num)) || [];
 }
 
-export function getCandlesticksByTF(type: IndexType, num: number, tf: "1m" | "5m" | "15m"): Candlestick[] {
+export function getCandlesticksByTF(type: IndexType, num: number, tf: "15m" | "30m" | "1h" | "2h"): Candlestick[] {
   const key = getKey(type, num);
-  const map = tf === "15m" ? candleMap15m : tf === "5m" ? candleMap5m : candleMap1m;
+  const map = tf === "30m" ? candleMap30m : tf === "1h" ? candleMap60m : tf === "2h" ? candleMap120m : candleMap15m;
   return map.get(key) || [];
 }
 
