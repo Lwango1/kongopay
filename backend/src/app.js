@@ -11,6 +11,7 @@ import { binanceLiveService } from './services/binanceLive.js';
 import { mlService } from './services/mlPrediction.js';
 import { ensembleML } from './services/ensembleML.js';
 import { signalTracker } from './services/signalTracker.js';
+import { riskManager } from './services/riskManager.js';
 import authRoutes from './routes/auth.js';
 import walletRoutes from './routes/wallet.js';
 import tradingRoutes from './routes/trading.js';
@@ -72,6 +73,15 @@ app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', version: '2.0.0', name: 'KongoPay API' });
 });
 
+app.get('/api/risk/stats', (_, res) => {
+  const stats = riskManager.getPerformanceStats();
+  res.json({
+    ...stats,
+    consecutiveLosses: riskManager.consecutiveLosses,
+    tradeHistory: riskManager.tradeHistory.slice(-20),
+  });
+});
+
 app.use(errorHandler);
 
 async function startBackgroundTasks() {
@@ -92,11 +102,26 @@ async function startBackgroundTasks() {
     try {
       await signalTracker.checkOpenSignals(derivGetPrice);
 
+      const activeSignals = []; // collect from signalTracker if needed
+      const accountBalance = 1000; // TODO: get from user wallet
+
       for (const idx of [{ type: 'BOOM', number: 500 }, { type: 'BOOM', number: 1000 },
         { type: 'CRASH', number: 500 }, { type: 'CRASH', number: 1000 }]) {
         const signal = await derivService.generateSignal(idx.type, idx.number);
         if (signal && signal.spikeProbability > 75) {
-          await derivService.emitSignal(idx.type, idx.number);
+          // Risk management filter
+          const filtered = await riskManager.filterSignal(signal, accountBalance, activeSignals);
+          if (filtered.allowed) {
+            const emitted = await derivService.emitSignal(idx.type, idx.number);
+            if (emitted) {
+              riskManager.recordTrade({
+                pnl: 0,
+                pnlPct: 0,
+                direction: emitted.direction,
+                label: emitted.label,
+              });
+            }
+          }
         }
       }
     } catch { /* background */ }
