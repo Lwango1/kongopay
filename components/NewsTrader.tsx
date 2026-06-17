@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getNewsData } from "@/lib/newsData";
+import { useState, useEffect, useCallback } from "react";
 import type { EconomicEvent, NewsSignal } from "@/lib/newsData";
 
 function ImpactBadge({ impact }: { impact: EconomicEvent["impact"] }) {
@@ -104,16 +103,26 @@ function SignalCard({ signal }: { signal: NewsSignal }) {
 }
 
 export default function NewsTrader() {
-  const [data, setData] = useState<ReturnType<typeof getNewsData> | null>(null);
+  const [data, setData] = useState<{ events: EconomicEvent[]; signals: NewsSignal[]; marketContext: any } | null>(null);
   const [filter, setFilter] = useState<"all" | EconomicEvent["impact"]>("all");
 
-  useEffect(() => {
-    setData(getNewsData());
-    const interval = setInterval(() => {
-      setData(getNewsData());
-    }, 60000);
-    return () => clearInterval(interval);
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/news");
+      if (res.ok) {
+        const json = await res.json();
+        setData(json);
+      }
+    } catch {
+      // fallback silencieux
+    }
   }, []);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 300000); // 5 min
+    return () => clearInterval(interval);
+  }, [fetchData]);
 
   if (!data) return null;
 

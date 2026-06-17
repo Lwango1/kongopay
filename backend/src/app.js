@@ -27,6 +27,7 @@ import subscriptionRoutes from './routes/subscription.js';
 import notificationsRoutes from './routes/notifications.js';
 import signalsRoutes from './routes/signals.js';
 import cryptoRoutes from './routes/crypto.js';
+import newsRoutes from './routes/news.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,6 +58,7 @@ initializeFirebase();
 
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/wallet', authLimiter, walletRoutes);
+app.use('/api/news', newsRoutes);
 app.use('/api/trading', authLimiter, tradingRoutes);
 app.use('/api/admin', authLimiter, adminRoutes);
 app.use('/api/mobile-money', authLimiter, mobileMoneyRoutes);
