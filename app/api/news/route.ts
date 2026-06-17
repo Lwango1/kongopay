@@ -29,6 +29,7 @@ export async function GET() {
       events: data.events,
       signals: data.signals,
       marketContext: data.marketContext,
+      activeTrades: [],
       source: "local",
       timestamp: Date.now(),
     });

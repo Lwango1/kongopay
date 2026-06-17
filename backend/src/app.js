@@ -146,6 +146,13 @@ async function startBackgroundTasks() {
     } catch { /* background */ }
   }, 30000);
 
+  // News Trading: process signals through risk manager every 5 min
+  const { processNewsSignals } = await import('./services/newsRiskBridge.js');
+  processNewsSignals(); // initial run
+  setInterval(() => {
+    processNewsSignals().catch(() => {});
+  }, 5 * 60 * 1000);
+
   setInterval(async () => {
     try {
       await ensembleML.retrainIfNeeded();

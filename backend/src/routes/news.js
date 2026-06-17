@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getEconomicCalendar, getNewsStats } from '../services/newsService.js';
+import { getActiveNewsTrades } from '../services/newsRiskBridge.js';
 
 const router = Router();
 
@@ -14,6 +15,10 @@ router.get('/', async (_, res) => {
 
 router.get('/stats', (_, res) => {
   res.json(getNewsStats());
+});
+
+router.get('/active-trades', (_, res) => {
+  res.json({ trades: getActiveNewsTrades(), count: getActiveNewsTrades().length });
 });
 
 export default router;
