@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { broadcastSignal } from './pushNotifications.js';
+import { fitSpikeIntervals, spikeProbability } from './spikeIntervalModel.js';
 
 const INDICES = [
   { type: 'BOOM', number: 500, symbol: 'BOOM500' },
@@ -50,6 +51,8 @@ class DerivLiveService {
         timestamps: [],
         lastSpikeTime: Date.now(),
         lastSpikeDirection: null,
+        spikeIntervals: [],
+        spikeIntervalModel: { shape: 1, scale: 1, mean: 0, stdDev: 0, sampleSize: 0, ready: false },
         connected: false,
       });
       this.candleMap15m.set(key, []);
@@ -122,6 +125,16 @@ class DerivLiveService {
     if (st.price > 0) {
       const spikeSize = Math.abs(quote - st.price) / st.price;
       if (spikeSize > 0.015) {
+        if (st.lastSpikeTime > 0) {
+          const interval = ts - st.lastSpikeTime;
+          if (interval > 1000) {
+            st.spikeIntervals.push(interval);
+            if (st.spikeIntervals.length > 50) st.spikeIntervals.shift();
+            if (st.spikeIntervals.length >= 3) {
+              st.spikeIntervalModel = fitSpikeIntervals(st.spikeIntervals);
+            }
+          }
+        }
         st.lastSpikeTime = ts;
         st.lastSpikeDirection = quote > st.price ? 'up' : 'down';
       }
@@ -431,12 +444,24 @@ class DerivLiveService {
     // --- Scoring ---
     const strengthBonus = Math.min(refStrength / 5, 1) * 0.08;
     const msSinceLastSpike = Date.now() - st.lastSpikeTime;
-    const timeFactor = Math.min(msSinceLastSpike / 60000, 1);
+
+    // Spike interval model (Weibull) au lieu du timeFactor linéaire
+    const spikeProb = spikeProbability(st.spikeIntervalModel, msSinceLastSpike, 60000);
+    let spikeFactor;
+    if (st.spikeIntervalModel.ready && st.spikeIntervalModel.sampleSize >= 3) {
+      const hazard = st.spikeIntervalModel.shape / Math.max(st.spikeIntervalModel.scale, 1);
+      const threshold = Math.min(1 - Math.exp(-hazard * 60), 0.8);
+      if (spikeProb > threshold) spikeFactor = 1;
+      else if (spikeProb < threshold * 0.5) spikeFactor = 0;
+      else spikeFactor = 0.5;
+    } else {
+      spikeFactor = Math.min(msSinceLastSpike / (30 * 60 * 1000), 1);
+    }
 
     let score = 0;
     score += extremeFactor * 0.35;
     score += momentumFactor * 0.12;
-    score += timeFactor * 0.05;
+    score += spikeFactor * 0.05;
     score += strengthBonus;
 
     // Bonus indicateurs techniques

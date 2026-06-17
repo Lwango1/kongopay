@@ -304,8 +304,10 @@ export function predictCrypto(type, num, history, currentPrice, candleMap15m, ca
   const refStrength = isUpDirection ? upStr : downStr;
 
   const msSinceLastSpike = Date.now() - lastSpikeTime;
-  const timeFactor = Math.min(msSinceLastSpike / 60000, 1);
-  let probability = Math.min(Math.max(bestScore * 100 + timeFactor * 5, 20), 97);
+  // Time factor non-linéaire: lent au début, accélère après 15min
+  const normalizedTime = Math.min(msSinceLastSpike / (30 * 60 * 1000), 1);
+  const timeFactor = normalizedTime * normalizedTime * (3 - 2 * normalizedTime); // smoothstep
+  let probability = Math.min(Math.max(bestScore * 100 + timeFactor * 8, 20), 97);
 
   // --- isApproaching ---
   let isApproaching = false;

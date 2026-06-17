@@ -1,6 +1,8 @@
 // Real Deriv WebSocket API — Live synthetic indices (Boom & Crash)
 // Requires DERIV_APP_ID env variable (get one free at https://app.deriv.com/account/api-token)
 
+import { fitSpikeIntervals, spikeProbability } from "./spikeIntervalModel";
+
 export type IndexType = "BOOM" | "CRASH";
 
 let touchModeEnabled = true;
@@ -15,6 +17,8 @@ export interface IndexState {
   timestamps: number[];
   lastSpikeTime: number;
   lastSpikeDirection: "up" | "down" | null;
+  spikeIntervals: number[];
+  spikeIntervalModel: import("./spikeIntervalModel").SpikeIntervalModel;
   connected: boolean;
   prevSignal: Signal | null;
   prevSignalPrice: number;
@@ -87,6 +91,8 @@ for (const idx of INDICES) {
     timestamps: [],
     lastSpikeTime: Date.now(),
     lastSpikeDirection: null,
+    spikeIntervals: [],
+    spikeIntervalModel: { shape: 1, scale: 1, mean: 0, stdDev: 0, sampleSize: 0, ready: false },
     connected: false,
     prevSignal: null,
     prevSignalPrice: 0,
@@ -161,6 +167,16 @@ function onTick(symbol: string, quote: number, epoch: number) {
   if (st.price > 0) {
     const spikeSize = Math.abs(quote - st.price) / st.price;
     if (spikeSize > 0.015) {
+      if (st.lastSpikeTime > 0) {
+        const interval = ts - st.lastSpikeTime;
+        if (interval > 1000) {
+          st.spikeIntervals.push(interval);
+          if (st.spikeIntervals.length > 50) st.spikeIntervals.shift();
+          if (st.spikeIntervals.length >= 3) {
+            st.spikeIntervalModel = fitSpikeIntervals(st.spikeIntervals);
+          }
+        }
+      }
       st.lastSpikeTime = ts;
       st.lastSpikeDirection = quote > st.price ? "up" : "down";
     }
@@ -768,6 +784,20 @@ export function predictSpike(type: IndexType, num: number) {
     const score120m = scoreSignal(currentPrice, ref120m, str120m, prices120m, isUp, rsi120m, market120m);
     if (score120m.score > 0.5) probability += 3;
     else probability -= 2;
+  }
+  // Spike interval model: probabilité conditionnelle Weibull
+  const spikeProb = spikeProbability(st.spikeIntervalModel, msSinceLastSpike, 60000);
+  if (st.spikeIntervalModel.ready && st.spikeIntervalModel.sampleSize >= 3) {
+    // Ajustement non-linéaire: boost quand la probabilité dépasse le seuil de l'hazard rate
+    const hazard = st.spikeIntervalModel.shape / Math.max(st.spikeIntervalModel.scale, 1);
+    const threshold = Math.min(1 - Math.exp(-hazard * 60), 0.8);
+    if (spikeProb > threshold) probability += 8;
+    else if (spikeProb < threshold * 0.5) probability -= 5;
+    else probability += 2;
+  } else {
+    // Fallback linéaire si pas assez d'échantillons
+    const timeFactor = Math.min(msSinceLastSpike / (30 * 60 * 1000), 1);
+    probability += Math.round(timeFactor * 5);
   }
   probability = Math.min(Math.max(probability, 0), 97);
 
