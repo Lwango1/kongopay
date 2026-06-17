@@ -937,7 +937,41 @@ class DerivLiveService {
       }
     } catch { /* ML not available, fallback to heuristic */ }
 
-    probability = Math.min(Math.max(probability + mlBoost + ensembleBoost, 0), 99);
+    // LSTM prediction
+    let lstmBoost = 0;
+    try {
+      const { lstmService } = await import('./lstrmPrediction.js');
+      if (lstmService.ready && history.length >= 21) {
+        const lstmSeq = lstmService.buildCurrentSequence(history, {
+          rsiAtTime: (t) => features.rsi,
+          atrRatioAtTime: (t) => features.atr_ratio,
+          momentumAtTime: (t) => features.momentum,
+          srDistanceAtTime: (t) => features.sr_distance,
+          consecutiveMovesAtTime: (t) => features.consecutive_moves,
+          volumeRatioAtTime: (t) => 0.5,
+          volRegimeAtTime: (t) => 0.5,
+          timeSinceSpikeAtTime: (t) => features.time_since_spike,
+          advancedCompositeAtTime: (t) => 0.5,
+        });
+        if (lstmSeq) {
+          const lstmResult = lstmService.predict(lstmSeq);
+          if (lstmResult.source === 'lstm') {
+            const lstmTotal = lstmResult.up + lstmResult.down + lstmResult.neutral || 1;
+            const lstmUpConf = lstmResult.up / lstmTotal;
+            const lstmDownConf = lstmResult.down / lstmTotal;
+            const lstmAgrees = (mlDirection === 'up' && lstmUpConf > lstmDownConf)
+              || (mlDirection === 'down' && lstmDownConf > lstmUpConf);
+            if (lstmAgrees) {
+              lstmBoost = Math.max(lstmUpConf, lstmDownConf) * 15;
+            } else {
+              lstmBoost = -Math.max(lstmUpConf, lstmDownConf) * 10;
+            }
+          }
+        }
+      }
+    } catch { /* LSTM not available */ }
+
+    probability = Math.min(Math.max(probability + mlBoost + ensembleBoost + lstmBoost, 0), 99);
 
     const upScore = mlDirection === 'up' ? probability : 100 - probability;
     const downScore = mlDirection === 'down' ? probability : 100 - probability;

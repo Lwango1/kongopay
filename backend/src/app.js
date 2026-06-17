@@ -7,6 +7,7 @@ import { initializeFirebase } from './config/firebase.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { apiLimiter, authLimiter } from './middleware/rateLimiter.js';
 import { derivService } from './services/deriv.js';
+import { binanceLiveService } from './services/binanceLive.js';
 import { mlService } from './services/mlPrediction.js';
 import { ensembleML } from './services/ensembleML.js';
 import { signalTracker } from './services/signalTracker.js';
@@ -23,6 +24,7 @@ import engagementRoutes from './routes/engagement.js';
 import subscriptionRoutes from './routes/subscription.js';
 import notificationsRoutes from './routes/notifications.js';
 import signalsRoutes from './routes/signals.js';
+import cryptoRoutes from './routes/crypto.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,7 +34,7 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", "'unsafe-inline'", 'https://*.firebaseio.com'],
-      connectSrc: ["'self'", 'wss://ws.binaryws.com', 'https://*.firebaseio.com'],
+      connectSrc: ["'self'", 'wss://ws.binaryws.com', 'wss://stream.binance.com:9443', 'https://*.firebaseio.com'],
       imgSrc: ["'self'", 'data:', 'https:'],
     },
   },
@@ -57,6 +59,7 @@ app.use('/api/trading', authLimiter, tradingRoutes);
 app.use('/api/admin', authLimiter, adminRoutes);
 app.use('/api/mobile-money', authLimiter, mobileMoneyRoutes);
 app.use('/api/deriv', authLimiter, derivRoutes);
+app.use('/api/crypto', authLimiter, cryptoRoutes);
 app.use('/api/p2p', authLimiter, p2pRoutes);
 app.use('/api/kyc', authLimiter, kycRoutes);
 app.use('/api/subscription', authLimiter, subscriptionRoutes);
@@ -74,6 +77,10 @@ app.use(errorHandler);
 async function startBackgroundTasks() {
   mlService.init();
   ensembleML.init();
+  try {
+    const { lstmService } = await import('./services/lstrmPrediction.js');
+    lstmService.init();
+  } catch { /* LSTM optionnel */ }
 
   const derivGetPrice = async (type, num) => {
     const key = `${type}_${num}`;
