@@ -318,39 +318,73 @@ export async function getEconomicCalendar() {
   let events = [];
   let source = 'cache';
 
-  // Try real sources first
-  for (const src of SOURCES) {
+  // 1. Try Financial Modeling Prep API (real data, free tier)
+  const fmpKey = process.env.FMP_API_KEY;
+  if (fmpKey) {
     try {
-      const res = await fetchWithTimeout(src.url, { headers: src.headers });
-      if (res.ok) {
-        const html = await res.text();
-        // Route to correct parser based on source
-        if (src.name === 'forexfactory') {
-          events = parseForexFactoryHtml(html);
-        } else {
-          events = parseInvestingHtml(html);
-        }
-        if (events.length > 5) {
-          source = src.name;
-          break;
+      const today = new Date().toISOString().split('T')[0];
+      const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+      const fmpRes = await fetch(
+        `https://financialmodelingprep.com/api/v3/economic-calendar?from=${today}&to=${nextWeek}&apikey=${fmpKey}`
+      );
+      if (fmpRes.ok) {
+        const json = await fmpRes.json();
+        events = json
+          .filter(e => e.event && e.country)
+          .map(e => ({
+            id: `FMP-${e.date}-${e.event?.slice(0, 10).replace(/\s/g, '-')}`,
+            date: e.date?.split(' ')[0] || today,
+            time: e.time || '12:00',
+            title: `${e.country} — ${e.event}`,
+            country: e.country?.slice(0, 2).toUpperCase() || '',
+            currency: e.currency || '',
+            impact: e.impact?.toLowerCase() === 'high' || e.importance === 'high' ? 'high'
+              : e.impact?.toLowerCase() === 'medium' || e.importance === 'medium' ? 'medium' : 'low',
+            previous: e.previous ?? '',
+            forecast: e.forecast ?? '',
+            actual: e.actual ?? null,
+            status: e.actual ? 'done' : 'upcoming',
+          }));
+        if (events.length > 3) {
+          source = 'fmp-api';
         }
       }
-    } catch {
-      // Source failed, try next
+    } catch (err) {
+      console.warn('[News] FMP API failed:', err.message);
     }
   }
 
-  // Fallback to realistic mock
+  // 2. Try HTML scraping (fallback)
+  if (!fmpKey || events.length < 5) {
+    for (const src of SOURCES) {
+      try {
+        const res = await fetchWithTimeout(src.url, { headers: src.headers });
+        if (res.ok) {
+          const html = await res.text();
+          if (src.name === 'forexfactory') {
+            events = parseForexFactoryHtml(html);
+          } else {
+            events = parseInvestingHtml(html);
+          }
+          if (events.length > 5) {
+            source = src.name;
+            break;
+          }
+        }
+      } catch {
+        // Source failed, try next
+      }
+    }
+  }
+
+  // 3. Fallback to realistic mock
   if (events.length < 5) {
     events = generateRealisticMock();
     source = 'mock';
   }
 
-  // Prix de référence pour les paires USD
-  const PAIR_PRICES = {
-    USD: 1, EUR: 1.0835, GBP: 1.2710, JPY: 150.25,
-    CHF: 0.8820, CAD: 1.3620, AUD: 0.6560, NZD: 0.6050,
-  };
+  // Prix réels depuis Deriv (ou fallback hardcodé)
+  const { forexPrices } = await import('./forexPrices.js');
   const pipSize = (cur) => cur === 'JPY' ? 0.01 : 0.0001;
 
   const signals = events
@@ -362,7 +396,7 @@ export async function getEconomicCalendar() {
       const tp2 = Math.round((analysis.direction === 'up' ? 1 : -1) * 1.0 * analysis.probability);
       const sl = Math.round((analysis.direction === 'up' ? -1 : 1) * 0.3 * analysis.probability);
 
-      const basePrice = PAIR_PRICES[e.currency] || PAIR_PRICES.USD;
+      const basePrice = forexPrices.priceForCurrency(e.currency) || 1.08;
       const pip = pipSize(e.currency);
       const slPips = e.impact === 'high' ? 40 : e.impact === 'medium' ? 25 : 15;
       const tpPips = Math.round(slPips * (1.5 + analysis.probability / 200));

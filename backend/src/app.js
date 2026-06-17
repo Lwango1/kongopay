@@ -97,6 +97,9 @@ app.get('/api/risk/stats', (_, res) => {
 app.use(errorHandler);
 
 async function startBackgroundTasks() {
+  const { forexPrices } = await import('./services/forexPrices.js');
+  forexPrices.connect();
+
   mlService.init();
   ensembleML.init();
   try {
