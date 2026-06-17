@@ -12,6 +12,7 @@ import { mlService } from './services/mlPrediction.js';
 import { ensembleML } from './services/ensembleML.js';
 import { signalTracker } from './services/signalTracker.js';
 import { riskManager } from './services/riskManager.js';
+import { eventBus } from './services/eventBus.js';
 import authRoutes from './routes/auth.js';
 import walletRoutes from './routes/wallet.js';
 import tradingRoutes from './routes/trading.js';
@@ -73,6 +74,15 @@ app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', version: '2.0.0', name: 'KongoPay API' });
 });
 
+app.get('/api/system/health', (_, res) => {
+  res.json({
+    status: 'ok',
+    memory: process.memoryUsage(),
+    uptime: process.uptime(),
+    eventBus: eventBus.getMetrics(),
+  });
+});
+
 app.get('/api/risk/stats', (_, res) => {
   const stats = riskManager.getPerformanceStats();
   res.json({
@@ -120,7 +130,14 @@ async function startBackgroundTasks() {
                 direction: emitted.direction,
                 label: emitted.label,
               });
+              eventBus.emit('signal', { ...emitted, risk: filtered.signal.risk });
             }
+          } else {
+            eventBus.emit('alert', {
+              type: 'signal_blocked',
+              reason: filtered.reason,
+              signal: { type: idx.type, number: idx.number },
+            });
           }
         }
       }
