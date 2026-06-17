@@ -371,9 +371,12 @@ export async function getEconomicCalendar() {
       const stopLoss = +(entry - dir * slPips * pip).toFixed(e.currency === 'JPY' ? 2 : 5);
       const takeProfit = +(entry + dir * tpPips * pip).toFixed(e.currency === 'JPY' ? 2 : 5);
 
+      const side = analysis.direction === 'up' ? 'buy' : analysis.direction === 'down' ? 'sell' : null;
+
       return {
         event: e,
         direction: analysis.direction,
+        side,
         probability: analysis.probability,
         reasoning: `${e.title} — Prévision: ${e.forecast} vs Précédent: ${e.previous}. ${analysis.direction === 'up' ? 'Hausse anticipée' : analysis.direction === 'down' ? 'Baisse anticipée' : 'Direction neutre'}.`,
         entryWindow: 'Session principale',

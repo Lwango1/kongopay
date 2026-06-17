@@ -63,8 +63,8 @@ function SignalCard({ signal }: { signal: NewsSignal }) {
         </div>
         <div className="bg-gray-800/50 rounded p-1.5">
           <span className="text-gray-500">Signal</span>
-          <p className={`font-mono font-bold ${signal.direction === "up" ? "text-green-400" : signal.direction === "down" ? "text-red-400" : "text-gray-400"}`}>
-            {signal.direction === "up" ? "HAUSSE" : signal.direction === "down" ? "BAISSE" : "NEUTRE"}
+          <p className={`font-mono font-bold ${signal.side === "buy" ? "text-green-400" : signal.side === "sell" ? "text-red-400" : "text-gray-400"}`}>
+            {signal.side ? signal.side.toUpperCase() : "NEUTRE"}
           </p>
         </div>
       </div>

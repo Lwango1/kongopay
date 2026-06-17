@@ -19,6 +19,7 @@ export interface EconomicEvent {
 export interface NewsSignal {
   event: EconomicEvent;
   direction: "up" | "down" | null;
+  side: "buy" | "sell" | null;
   probability: number;
   reasoning: string;
   entryWindow: string;
@@ -182,6 +183,7 @@ function analyzeEvent(event: EconomicEvent, marketContext: { trend: string; vola
 
   probability = Math.min(Math.max(probability, 30), 92);
   const directionText = direction === "up" ? "Hausse" : direction === "down" ? "Baisse" : "Neutre";
+  const side = direction === "up" ? "buy" : direction === "down" ? "sell" : null;
 
   const [h] = event.time.split(":").map(Number);
   const entryWindow = h < 12 ? "Avant l'ouverture européenne" : h < 15 ? "Session Londres" : "Session New York";
@@ -196,6 +198,7 @@ function analyzeEvent(event: EconomicEvent, marketContext: { trend: string; vola
   return {
     event,
     direction,
+    side,
     probability: Math.round(probability),
     reasoning,
     entryWindow,
