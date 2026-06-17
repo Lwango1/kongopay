@@ -86,6 +86,90 @@ function parseInvestingHtml(html) {
   return events;
 }
 
+// Parse forexfactory.com HTML (structure totalement différente d'investing.com)
+function parseForexFactoryHtml(html) {
+  const events = [];
+  let currentDate = '';
+
+  // Find all calendar rows (not headers, not day-breakers)
+  const rowRegex = /<tr[^>]*class="[^"]*calendar__row[^"]*"[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const row = rowMatch[1];
+
+    // Day breaker: extract date
+    const dayMatch = rowMatch[0].match(/data-date="([^"]+)"/);
+    if (dayMatch) {
+      currentDate = dayMatch[1];
+      continue;
+    }
+
+    // Skip header rows
+    if (row.includes('day-headers') || rowMatch[0].includes('day-headers')) continue;
+
+    // Extract cells
+    const cells = [];
+    const cellRegex = /<td[^>]*class="[^"]*calendar__cell[^"]*"[^>]*>([\s\S]*?)<\/td>/gi;
+    let cellMatch;
+    while ((cellMatch = cellRegex.exec(row)) !== null) {
+      cells.push(cellMatch[1]);
+    }
+
+    if (cells.length < 4) continue;
+
+    const extract = (idx) => cells[idx]?.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, '').trim() || '';
+
+    // Time
+    const timeSpan = cells[0]?.match(/<span[^>]*>([\s\S]*?)<\/span>/);
+    const time = timeSpan ? timeSpan[1].trim() : extract(0);
+
+    // Currency
+    const currency = extract(1);
+
+    // Impact: look for impact--high, impact--medium, impact--low classes
+    let impact = 'low';
+    if (cells[2]?.includes('impact--high')) impact = 'high';
+    else if (cells[2]?.includes('impact--medium')) impact = 'medium';
+
+    // Event title
+    const titleSpan = cells[3]?.match(/<span[^>]*class="[^"]*calendar__event-title[^"]*"[^>]*>([\s\S]*?)<\/span>/);
+    const eventTitle = titleSpan ? titleSpan[1].replace(/<[^>]*>/g, '').trim() : extract(3);
+
+    // Previous / Forecast / Actual (may be in different order)
+    const prev = extract(4);
+    const fore = extract(5);
+    const act = extract(6);
+
+    // Determine country from currency
+    const currencyToCountry = {
+      'USD': 'US', 'EUR': 'EU', 'GBP': 'UK', 'JPY': 'JP',
+      'CHF': 'CH', 'CAD': 'CA', 'AUD': 'AU', 'NZD': 'NZ',
+      'CNY': 'CN', 'HKD': 'HK', 'SGD': 'SG', 'NOK': 'NO',
+      'SEK': 'SE', 'MXN': 'MX', 'ZAR': 'ZA', 'TRY': 'TR',
+      'RUB': 'RU', 'INR': 'IN', 'BRL': 'BR', 'KRW': 'KR',
+    };
+
+    if (!time.match(/\d{2}:\d{2}/)) continue;
+
+    events.push({
+      id: `FX-${currentDate}-${eventTitle.slice(0, 10).replace(/\s/g, '-')}`,
+      date: currentDate,
+      time,
+      title: `${currencyToCountry[currency] || currency} — ${eventTitle}`,
+      country: currencyToCountry[currency] || currency.slice(0, 2),
+      currency,
+      impact,
+      previous: prev,
+      forecast: fore,
+      actual: act || null,
+      status: act ? 'done' : 'upcoming',
+    });
+  }
+
+  return events;
+}
+
 // Fallback: données simulées réalistes basées sur le calendrier réel
 function generateRealisticMock() {
   const now = new Date();
@@ -240,7 +324,12 @@ export async function getEconomicCalendar() {
       const res = await fetchWithTimeout(src.url, { headers: src.headers });
       if (res.ok) {
         const html = await res.text();
-        events = parseInvestingHtml(html);
+        // Route to correct parser based on source
+        if (src.name === 'forexfactory') {
+          events = parseForexFactoryHtml(html);
+        } else {
+          events = parseInvestingHtml(html);
+        }
         if (events.length > 5) {
           source = src.name;
           break;
