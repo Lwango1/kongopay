@@ -82,6 +82,26 @@ function SignalCard({ signal }: { signal: NewsSignal }) {
         </div>
       </div>
 
+      {/* Entry / SL / TP en prix réels */}
+      <div className="grid grid-cols-4 gap-1 text-[10px] mb-2 bg-gray-900/60 rounded-lg p-2">
+        <div className="text-center">
+          <span className="text-gray-500 block">Paire</span>
+          <span className="text-white font-mono font-bold">{signal.pair}</span>
+        </div>
+        <div className="text-center">
+          <span className="text-gray-500 block">Entry</span>
+          <span className="text-white font-mono font-bold">{signal.entry.toFixed(5)}</span>
+        </div>
+        <div className="text-center">
+          <span className="text-gray-500 block">TP</span>
+          <span className="text-green-400 font-mono font-bold">{signal.takeProfit.toFixed(5)}</span>
+        </div>
+        <div className="text-center">
+          <span className="text-gray-500 block">SL</span>
+          <span className="text-red-400 font-mono font-bold">{signal.stopLoss.toFixed(5)}</span>
+        </div>
+      </div>
+
       <div className="grid grid-cols-3 gap-2 text-xs mb-3">
         <div className="bg-gray-800/30 rounded p-1.5 text-center">
           <span className="text-gray-500 block">TP1</span>

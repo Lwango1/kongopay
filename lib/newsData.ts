@@ -22,6 +22,10 @@ export interface NewsSignal {
   probability: number;
   reasoning: string;
   entryWindow: string;
+  pair: string;
+  entry: number;
+  stopLoss: number;
+  takeProfit: number;
   targets: { tp1: string; tp2: string; sl: string };
 }
 
@@ -103,18 +107,64 @@ function generateMockEvents(): EconomicEvent[] {
   return events;
 }
 
+// Prix de référence pour les paires USD (mock, sera remplacé par les prix Deriv)
+const PAIR_PRICES: Record<string, number> = {
+  USD: 1,
+  EUR: 1.0835,
+  GBP: 1.2710,
+  JPY: 150.25,
+  CHF: 0.8820,
+  CAD: 1.3620,
+  AUD: 0.6560,
+  NZD: 0.6050,
+  CNH: 7.2450,
+};
+
+// Taille d'un pip en fonction de la paire
+function pipSize(currency: string): number {
+  if (currency === 'JPY') return 0.01;
+  if (currency === 'USD' || currency === 'CAD') return 0.0001;
+  return 0.0001;
+}
+
+// Calcul des TP/SL en prix réel
+function levelsFromDirection(
+  basePrice: number,
+  direction: "up" | "down" | null,
+  probability: number,
+  pair: string,
+  impact: string
+): { entry: number; stopLoss: number; takeProfit: number } {
+  if (!direction) return { entry: basePrice, stopLoss: basePrice, takeProfit: basePrice };
+
+  const pip = pipSize(pair);
+  // Pips ajustés selon l'impact et la probabilité
+  const slPips = impact === 'high' ? 40 : impact === 'medium' ? 25 : 15;
+  const tpPips = Math.round(slPips * (1.5 + probability / 200));
+
+  const directionMult = direction === "up" ? 1 : -1;
+  return {
+    entry: basePrice,
+    stopLoss: +(basePrice - directionMult * slPips * pip).toFixed(pair === 'JPY' ? 2 : 5),
+    takeProfit: +(basePrice + directionMult * tpPips * pip).toFixed(pair === 'JPY' ? 2 : 5),
+  };
+}
+
+// Détermine la paire à trader selon la devise de l'événement
+function getPair(currency: string): string {
+  if (currency === 'USD') return 'EURUSD'; // sur news US, on trade EUR/USD
+  return `${currency}USD`; // ex: GBPUSD, AUDUSD, NZDUSD
+}
+
 // Analyse d'impact et génération de signal
 function analyzeEvent(event: EconomicEvent, marketContext: { trend: string; volatility: string }): NewsSignal {
   const impactScores: Record<string, number> = { high: 3, medium: 2, low: 1 };
   const baseScore = impactScores[event.impact];
 
-  // Parse previous and forecast for comparison
   const parsePct = (s: string) => parseFloat(s.replace("%", "").replace("+", "")) || 0;
   const prevVal = parsePct(event.previous);
   const forecastVal = parsePct(event.forecast);
 
-  // Direction: if forecast > previous → bullish (economy growing)
-  // But depends on currency context (e.g., high inflation → rate hike → strong currency)
   const forecastDiff = forecastVal - prevVal;
   let direction: "up" | "down" | null = null;
   let probability = 50 + baseScore * 8;
@@ -124,23 +174,24 @@ function analyzeEvent(event: EconomicEvent, marketContext: { trend: string; vola
     probability += Math.min(Math.abs(forecastDiff) * 5, 15);
   }
 
-  // Volatility boost
   if (marketContext.volatility === "high") probability += 5;
   if (marketContext.trend === "trending_bull") probability += 3;
 
-  // Impact bonus
   if (event.impact === "high") probability += 10;
   if (event.impact === "low") probability -= 5;
 
   probability = Math.min(Math.max(probability, 30), 92);
   const directionText = direction === "up" ? "Hausse" : direction === "down" ? "Baisse" : "Neutre";
 
-  // Parse hour for entry window
   const [h] = event.time.split(":").map(Number);
   const entryWindow = h < 12 ? "Avant l'ouverture européenne" : h < 15 ? "Session Londres" : "Session New York";
 
+  const pair = getPair(event.currency);
+  const basePrice = PAIR_PRICES[event.currency] || PAIR_PRICES.USD;
+  const { entry, stopLoss, takeProfit } = levelsFromDirection(basePrice, direction, probability, pair, event.impact);
+
   const reasoning = `${event.title} — Prévision: ${event.forecast} vs Précédent: ${event.previous}. ` +
-    `Direction anticipée: ${directionText}. Impact: ${event.impact === "high" ? "Fort, attendre 5 min après la publication" : "Modéré, scalping 15 min"}.`;
+    `Direction anticipée: ${directionText} sur ${pair}. Impact: ${event.impact === "high" ? "Fort, attendre 5 min après la publication" : "Modéré, scalping 15 min"}.`;
 
   return {
     event,
@@ -148,6 +199,10 @@ function analyzeEvent(event: EconomicEvent, marketContext: { trend: string; vola
     probability: Math.round(probability),
     reasoning,
     entryWindow,
+    pair,
+    entry,
+    stopLoss,
+    takeProfit,
     targets: {
       tp1: `${Math.round((direction === "up" ? 1 : -1) * 0.5 * probability)} pips`,
       tp2: `${Math.round((direction === "up" ? 1 : -1) * 1.0 * probability)} pips`,

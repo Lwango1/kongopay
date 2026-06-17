@@ -12,17 +12,14 @@ let activeTrades = new Map(); // eventId -> trade
 
 function signalToRiskManagerFormat(newsSignal) {
   const e = newsSignal.event;
-  const entryPips = newsSignal.direction === 'up' ? 100 : 100;
-  const slPips = parseInt(newsSignal.targets.sl) || 30;
-  const tp1Pips = parseInt(newsSignal.targets.tp1) || 50;
 
   return {
-    type: `NEWS_${e.currency || 'FX'}`,
-    label: e.title?.slice(0, 40) || `News ${e.currency}`,
+    type: `NEWS_${newsSignal.pair || e.currency || 'FX'}`,
+    label: `${newsSignal.pair || e.currency} — ${e.title?.slice(0, 36) || 'News'}`,
     expectedDirection: newsSignal.direction === 'up' ? 'CALL' : newsSignal.direction === 'down' ? 'PUT' : 'NEUTRAL',
-    entryPrice: entryPips,
-    stopLoss: entryPips + (newsSignal.direction === 'up' ? -slPips : slPips),
-    takeProfit: entryPips + (newsSignal.direction === 'up' ? tp1Pips : -tp1Pips),
+    entryPrice: newsSignal.entry || 1,
+    stopLoss: newsSignal.stopLoss || 0.99,
+    takeProfit: newsSignal.takeProfit || 1.01,
     spikeProbability: newsSignal.probability,
     volScale: e.impact === 'high' ? 1.5 : e.impact === 'medium' ? 1.0 : 0.7,
   };
@@ -53,9 +50,13 @@ export async function processNewsSignals() {
         const trade = {
           id: eventId,
           event: ns.event,
+          pair: ns.pair,
           direction: ns.direction,
           probability: ns.probability,
           reasoning: ns.reasoning,
+          entry: ns.entry,
+          stopLoss: ns.stopLoss,
+          takeProfit: ns.takeProfit,
           risk: filtered.signal.risk,
           timestamp: now,
         };

@@ -346,7 +346,13 @@ export async function getEconomicCalendar() {
     source = 'mock';
   }
 
-  // Analyze events and generate signals
+  // Prix de référence pour les paires USD
+  const PAIR_PRICES = {
+    USD: 1, EUR: 1.0835, GBP: 1.2710, JPY: 150.25,
+    CHF: 0.8820, CAD: 1.3620, AUD: 0.6560, NZD: 0.6050,
+  };
+  const pipSize = (cur) => cur === 'JPY' ? 0.01 : 0.0001;
+
   const signals = events
     .filter(e => e.status !== 'done' && e.impact !== 'low')
     .slice(0, 12)
@@ -356,12 +362,25 @@ export async function getEconomicCalendar() {
       const tp2 = Math.round((analysis.direction === 'up' ? 1 : -1) * 1.0 * analysis.probability);
       const sl = Math.round((analysis.direction === 'up' ? -1 : 1) * 0.3 * analysis.probability);
 
+      const basePrice = PAIR_PRICES[e.currency] || PAIR_PRICES.USD;
+      const pip = pipSize(e.currency);
+      const slPips = e.impact === 'high' ? 40 : e.impact === 'medium' ? 25 : 15;
+      const tpPips = Math.round(slPips * (1.5 + analysis.probability / 200));
+      const dir = analysis.direction === 'up' ? 1 : analysis.direction === 'down' ? -1 : 0;
+      const entry = basePrice;
+      const stopLoss = +(entry - dir * slPips * pip).toFixed(e.currency === 'JPY' ? 2 : 5);
+      const takeProfit = +(entry + dir * tpPips * pip).toFixed(e.currency === 'JPY' ? 2 : 5);
+
       return {
         event: e,
         direction: analysis.direction,
         probability: analysis.probability,
         reasoning: `${e.title} — Prévision: ${e.forecast} vs Précédent: ${e.previous}. ${analysis.direction === 'up' ? 'Hausse anticipée' : analysis.direction === 'down' ? 'Baisse anticipée' : 'Direction neutre'}.`,
         entryWindow: 'Session principale',
+        pair: e.currency === 'USD' ? 'EURUSD' : `${e.currency}USD`,
+        entry,
+        stopLoss,
+        takeProfit,
         targets: {
           tp1: `${Math.abs(tp1)} pips`,
           tp2: `${Math.abs(tp2)} pips`,
