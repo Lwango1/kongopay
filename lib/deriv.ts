@@ -2,6 +2,7 @@
 // Requires DERIV_APP_ID env variable (get one free at https://app.deriv.com/account/api-token)
 
 import { fitSpikeIntervals, spikeProbability } from "./spikeIntervalModel";
+import { computeAdvancedFeatures } from "./advancedFeatures";
 
 export type IndexType = "BOOM" | "CRASH";
 
@@ -746,7 +747,21 @@ export function predictSpike(type: IndexType, num: number) {
   else if (regime.market === "volatile") regimeBonus += 0.02;
   else if (regime.market === "calm") regimeBonus -= 0.02;
 
-  bestScore = Math.min(bestScore + indicatorBonus + patternBonus + regimeBonus, 1);
+  // --- Features avancées (GARCH, Wavelet, Fourier) ---
+  let advancedBonus = 0;
+  try {
+    const adv = computeAdvancedFeatures(history);
+    if (adv.compositeScore > 0.6) advancedBonus += 0.06;
+    else if (adv.compositeScore > 0.4) advancedBonus += 0.03;
+    if (adv.garchVolRatio > 1.5) advancedBonus += 0.03; // Vol clustering
+    if (adv.waveletSpikeScore > 0.5) advancedBonus += 0.04; // Wavelet spike pattern
+    if (adv.fourierSpikeScore > 0.5) advancedBonus += 0.03; // Fourier periodicity
+    if (adv.dominantPeriod >= 5 && adv.dominantPeriod <= 15) advancedBonus += 0.02;
+  } catch (e) {
+    // Silently fail
+  }
+
+  bestScore = Math.min(bestScore + indicatorBonus + patternBonus + regimeBonus + advancedBonus, 1);
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   let probability = Math.min(Math.max(bestScore * 100, 20), 97);

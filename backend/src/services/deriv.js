@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import { broadcastSignal } from './pushNotifications.js';
 import { fitSpikeIntervals, spikeProbability } from './spikeIntervalModel.js';
+import { computeAdvancedFeatures } from './advancedFeatures.js';
 
 const INDICES = [
   { type: 'BOOM', number: 500, symbol: 'BOOM500' },
@@ -487,6 +488,16 @@ class DerivLiveService {
     if ((isBoom && patternSignal.signal === 'bullish') || (!isBoom && patternSignal.signal === 'bearish')) {
       indicatorBonus += Math.min(patternSignal.score / 20, 0.04);
     }
+
+    // Features avancées (GARCH, Wavelet, Fourier)
+    try {
+      const adv = computeAdvancedFeatures(history);
+      if (adv.compositeScore > 0.6) indicatorBonus += 0.06;
+      else if (adv.compositeScore > 0.4) indicatorBonus += 0.03;
+      if (adv.garchVolRatio > 1.5) indicatorBonus += 0.03;
+      if (adv.waveletSpikeScore > 0.5) indicatorBonus += 0.04;
+      if (adv.fourierSpikeScore > 0.5) indicatorBonus += 0.03;
+    } catch (e) { /* silent */ }
 
     score = Math.min(score + indicatorBonus, 1);
 
