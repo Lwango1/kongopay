@@ -23,35 +23,32 @@ export async function GET() {
       }
     } catch {}
 
-    // Fallback: Financial Modeling Prep API (si clé configurée)
-    const fmpKey = process.env.FMP_API_KEY;
-    if (fmpKey) {
+    // Fallback: Finnhub API (si clé configurée)
+    const finnhubKey = process.env.FINNHUB_API_KEY;
+    if (finnhubKey) {
       try {
-        const today = new Date().toISOString().split("T")[0];
-        const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split("T")[0];
-        const fmpRes = await fetch(
-          `https://financialmodelingprep.com/api/v3/economic-calendar?from=${today}&to=${nextWeek}&apikey=${fmpKey}`
-        );
-        if (fmpRes.ok) {
-          const json = await fmpRes.json();
-          const events = (json || [])
-            .filter((e: any) => e.event && e.country)
+        const fhRes = await fetch(`https://finnhub.io/api/v1/calendar/economic?token=${finnhubKey}`);
+        if (fhRes.ok) {
+          const json = await fhRes.json();
+          const calendar: any[] = json.economicCalendar || [];
+          const events = calendar
+            .filter((e: any) => e.event)
             .map((e: any) => ({
-              id: `FMP-${e.date}-${((e.event || "").slice(0, 10)).replace(/\s/g, "-")}`,
-              date: (e.date || "").split(" ")[0] || today,
-              time: e.time || "12:00",
-              title: `${e.country} — ${e.event}`,
-              country: (e.country || "").slice(0, 2).toUpperCase(),
+              id: `FH-${((e.event || "").slice(0, 20)).replace(/\s/g, "-")}-${Math.random().toString(36).slice(2, 6)}`,
+              date: (e.time || "").split(" ")[0] || new Date().toISOString().split("T")[0],
+              time: (e.time || "").split(" ")[1]?.slice(0, 5) || "12:00",
+              title: `${e.country || ""} — ${e.event}`,
+              country: e.country || "",
               currency: e.currency || "",
-              impact: e.impact?.toLowerCase() === "high" || e.importance === "high" ? "high" : e.impact?.toLowerCase() === "medium" || e.importance === "medium" ? "medium" : "low",
-              previous: e.previous ?? "",
-              forecast: e.forecast ?? "",
-              actual: e.actual ?? null,
-              status: e.actual ? "done" : "upcoming",
+              impact: e.impact === "high" || e.impact === "medium" || e.impact === "low" ? e.impact : "medium",
+              previous: e.prev != null ? String(e.prev) : "",
+              forecast: e.estimate != null ? String(e.estimate) : "",
+              actual: e.actual != null ? String(e.actual) : null,
+              status: e.actual != null ? "done" : "upcoming",
               sentiment: null,
               confidence: 0,
             }));
-          return NextResponse.json({ events, signals: [], marketContext: { trend: "ranging", volatility: "medium" }, source: "fmp-api", timestamp: Date.now() });
+          return NextResponse.json({ events, signals: [], marketContext: { trend: "ranging", volatility: "medium" }, source: "finnhub-api", timestamp: Date.now() });
         }
       } catch {}
     }

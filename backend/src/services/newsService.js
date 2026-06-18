@@ -318,44 +318,43 @@ export async function getEconomicCalendar() {
   let events = [];
   let source = 'cache';
 
-  // 1. Try Financial Modeling Prep API (real data, free tier)
-  const fmpKey = process.env.FMP_API_KEY;
-  if (fmpKey) {
+  // 1. Try Finnhub API (free tier: 60 calls/min, no credit card)
+  //    Inscription: https://finnhub.io/register → API Key gratuite
+  const finnhubKey = process.env.FINNHUB_API_KEY;
+  if (finnhubKey) {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
-      const fmpRes = await fetch(
-        `https://financialmodelingprep.com/api/v3/economic-calendar?from=${today}&to=${nextWeek}&apikey=${fmpKey}`
+      const finnhubRes = await fetch(
+        `https://finnhub.io/api/v1/calendar/economic?token=${finnhubKey}`
       );
-      if (fmpRes.ok) {
-        const json = await fmpRes.json();
-        events = json
-          .filter(e => e.event && e.country)
+      if (finnhubRes.ok) {
+        const json = await finnhubRes.json();
+        const calendar = json.economicCalendar || [];
+        events = calendar
+          .filter(e => e.event)
           .map(e => ({
-            id: `FMP-${e.date}-${e.event?.slice(0, 10).replace(/\s/g, '-')}`,
-            date: e.date?.split(' ')[0] || today,
-            time: e.time || '12:00',
-            title: `${e.country} — ${e.event}`,
-            country: e.country?.slice(0, 2).toUpperCase() || '',
+            id: `FH-${e.event?.slice(0, 20).replace(/\s/g, '-')}-${Math.random().toString(36).slice(2, 6)}`,
+            date: e.time?.split(' ')[0] || new Date().toISOString().split('T')[0],
+            time: e.time?.split(' ')[1]?.slice(0, 5) || '12:00',
+            title: `${e.country || ''} — ${e.event}`,
+            country: e.country || '',
             currency: e.currency || '',
-            impact: e.impact?.toLowerCase() === 'high' || e.importance === 'high' ? 'high'
-              : e.impact?.toLowerCase() === 'medium' || e.importance === 'medium' ? 'medium' : 'low',
-            previous: e.previous ?? '',
-            forecast: e.forecast ?? '',
-            actual: e.actual ?? null,
-            status: e.actual ? 'done' : 'upcoming',
+            impact: e.impact === 'high' || e.impact === 'medium' || e.impact === 'low' ? e.impact : 'medium',
+            previous: e.prev != null ? String(e.prev) : '',
+            forecast: e.estimate != null ? String(e.estimate) : '',
+            actual: e.actual != null ? String(e.actual) : null,
+            status: e.actual != null ? 'done' : 'upcoming',
           }));
         if (events.length > 3) {
-          source = 'fmp-api';
+          source = 'finnhub-api';
         }
       }
     } catch (err) {
-      console.warn('[News] FMP API failed:', err.message);
+      console.warn('[News] Finnhub API failed:', err.message);
     }
   }
 
   // 2. Try HTML scraping (fallback)
-  if (!fmpKey || events.length < 5) {
+  if (!finnhubKey || events.length < 5) {
     for (const src of SOURCES) {
       try {
         const res = await fetchWithTimeout(src.url, { headers: src.headers });
