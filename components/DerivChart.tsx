@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import {
   createChart, IChartApi, CandlestickSeries, LineSeries,
-  ISeriesApi, ColorType,
+  ISeriesApi, ColorType, createSeriesMarkers,
 } from "lightweight-charts";
 import {
   Flame, Droplet,
@@ -56,6 +56,8 @@ export default function DerivChart() {
   const rsiLineSeries = useRef<ISeriesApi<"Line", any> | null>(null);
   const rsiOverboughtSeries = useRef<ISeriesApi<"Line", any> | null>(null);
   const rsiOversoldSeries = useRef<ISeriesApi<"Line", any> | null>(null);
+  const markerPlugin = useRef<any>(null);
+  const srPriceLines = useRef<any[]>([]);
 
   const pausedRef = useRef(false);
 
@@ -87,6 +89,7 @@ export default function DerivChart() {
     rsiLineSeries.current = null;
     rsiOverboughtSeries.current = null;
     rsiOversoldSeries.current = null;
+    markerPlugin.current = null;
 
     const sharedLayout = {
       background: { type: ColorType.Solid, color: "transparent" as const },
@@ -197,6 +200,61 @@ export default function DerivChart() {
       rsiOversoldSeries.current?.setData(rsiData.map(d => ({ time: d.time, value: 30 })));
     }
 
+    // Marqueurs de spikes + lignes S/R sur le graphique
+    if (candleSeries.current) {
+      if (!markerPlugin.current) {
+        markerPlugin.current = createSeriesMarkers(candleSeries.current);
+      }
+
+      // Nettoyer les anciennes lignes S/R
+      for (const line of srPriceLines.current) {
+        candleSeries.current.removePriceLine(line);
+      }
+      srPriceLines.current = [];
+
+      const prediction = (() => {
+        const p = selectedSymbol.split("_");
+        const result = predictSpike(p[0] as IndexType, parseInt(p[1]));
+        if (!result || "error" in result) return null;
+        return result as any;
+      })();
+
+      const markers: any[] = [];
+
+      // Lignes S/R horizontales
+      if (prediction?.sRlevels) {
+        for (const level of prediction.sRlevels.slice(0, 6)) {
+          const line = candleSeries.current.createPriceLine({
+            price: level.price,
+            color: level.type === "support" ? "#22c55e60" : "#ef444460",
+            lineWidth: level.strength > 4 ? 2 : 1,
+            lineStyle: 2 as any, // Dashed
+            axisLabelVisible: true,
+            title: level.type === "support" ? `S${level.strength}` : `R${level.strength}`,
+          });
+          srPriceLines.current.push(line);
+        }
+      }
+
+      // Flèche de signal
+      if (prediction && prediction.signal !== "NEUTRAL") {
+        const lastTime = candles[candles.length - 1]?.time;
+        if (lastTime) {
+          const isUp = prediction.expectedDirection === "up";
+          markers.push({
+            time: lastTime as any,
+            position: isUp ? "belowBar" : "aboveBar" as any,
+            shape: isUp ? "arrowUp" : "arrowDown" as any,
+            color: isUp ? "#22c55e" : "#ef4444",
+            text: ` ${prediction.spikeProbability}%`,
+            size: 1.5,
+          });
+        }
+      }
+
+      markerPlugin.current.setMarkers(markers);
+    }
+
     if (mainChartApi.current) {
       mainChartApi.current.timeScale().fitContent();
     }
@@ -286,25 +344,18 @@ export default function DerivChart() {
           <span className={`text-lg font-mono ${change >= 0 ? "text-success" : "text-danger"}`}>
             {change >= 0 ? "+" : ""}{change.toFixed(2)}%
           </span>
-          {prediction?.regime && (
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-              prediction.regime.market === "trending_bull" ? "bg-success/15 text-success" :
-              prediction.regime.market === "trending_bear" ? "bg-danger/15 text-danger" :
-              prediction.regime.market === "volatile" ? "bg-warning/15 text-warning" :
-              "bg-surface-light text-text-muted"
+          {prediction && prediction.signal !== "NEUTRAL" && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${
+              prediction.expectedDirection === "up" ? "bg-success/15 text-success" : "bg-danger/15 text-danger"
             }`}>
-              {prediction.regime.market === "trending_bull" ? "Tendance haussière" :
-               prediction.regime.market === "trending_bear" ? "Tendance baissière" :
-               prediction.regime.market === "volatile" ? "Volatile" :
-               prediction.regime.market === "calm" ? "Calme" : "Range"}
+              {prediction.signal === "STRONG_BUY" || prediction.signal === "STRONG_SELL" ? "⚡ " : ""}
+              {prediction.expectedDirection === "up" ? "▲" : "▼"} {prediction.spikeProbability}%
             </span>
           )}
           {prediction && (
             <span className="text-xs text-text-muted font-mono">
-              v{typeof prediction.volScale === 'number' ? prediction.volScale.toFixed(1) : '-'}
-              {typeof prediction.approachVelocity === 'number' && prediction.approachVelocity > 0
-                ? ` · ${prediction.approachVelocity.toFixed(2)}`
-                : ''}
+              v{prediction.volScale?.toFixed(1) ?? '-'}
+              {prediction.isSpikeImminent ? ' ⚡' : ''}
             </span>
           )}
         </div>
