@@ -103,7 +103,7 @@ async function startBackgroundTasks() {
   mlService.init();
   ensembleML.init();
   try {
-    const { lstmService } = await import('./services/lstrmPrediction.js');
+    const { lstmService } = await import('./services/lstmPrediction.js');
     lstmService.init();
   } catch { /* LSTM optionnel */ }
 

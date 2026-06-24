@@ -940,7 +940,7 @@ class DerivLiveService {
     // LSTM prediction
     let lstmBoost = 0;
     try {
-      const { lstmService } = await import('./lstrmPrediction.js');
+      const { lstmService } = await import('./lstmPrediction.js');
       if (lstmService.ready && history.length >= 21) {
         const lstmSeq = lstmService.buildCurrentSequence(history, {
           rsiAtTime: (t) => features.rsi,

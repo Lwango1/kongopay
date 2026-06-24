@@ -136,9 +136,116 @@ export function calculateOBV(prices: number[]): number {
   return obv;
 }
 
+export function calculateROC(prices: number[], period = 10): number {
+  if (prices.length < period + 1) return 0;
+  const prev = prices[prices.length - period - 1];
+  const curr = prices[prices.length - 1];
+  return prev > 0 ? ((curr - prev) / prev) * 100 : 0;
+}
+
+export function calculateWilliamsR(prices: number[], period = 14): number {
+  if (prices.length < period) return -50;
+  const recent = prices.slice(-period);
+  const highest = Math.max(...recent);
+  const lowest = Math.min(...recent);
+  const close = prices[prices.length - 1];
+  if (highest === lowest) return -50;
+  return ((highest - close) / (highest - lowest)) * -100;
+}
+
+export function calculateMFI(
+  prices: number[],
+  volumes?: number[]
+): number {
+  const period = 14;
+  if (prices.length < period + 1) return 50;
+  const recent = prices.slice(-period - 1);
+  const typicalPrices: number[] = [];
+  const moneyFlows: number[] = [];
+
+  for (let i = 0; i < recent.length; i++) {
+    const vol = volumes?.[i] ?? (i + 1);
+    const tp = recent[i];
+    typicalPrices.push(tp);
+    moneyFlows.push(tp * vol);
+  }
+
+  let positiveFlow = 0;
+  let negativeFlow = 0;
+  for (let i = 1; i < typicalPrices.length; i++) {
+    if (typicalPrices[i] > typicalPrices[i - 1]) {
+      positiveFlow += moneyFlows[i];
+    } else {
+      negativeFlow += moneyFlows[i];
+    }
+  }
+
+  if (negativeFlow === 0) return 100;
+  const ratio = positiveFlow / negativeFlow;
+  return 100 - 100 / (1 + ratio);
+}
+
 export function calculateVWAP(prices: number[]): number {
   if (prices.length === 0) return 0;
   const total = prices.reduce((sum, p, i) => sum + p * (i + 1), 0);
   const volume = (prices.length * (prices.length + 1)) / 2;
   return total / volume;
+}
+
+export function calculateVWAPDistance(prices: number[]): number {
+  if (prices.length < 20) return 0;
+  const vwap = calculateVWAP(prices);
+  const currentPrice = prices[prices.length - 1];
+  if (vwap === 0) return 0;
+  return (currentPrice - vwap) / vwap;
+}
+
+export function calculateATRPercent(prices: number[], period = 14): number {
+  const atrVal = calculateATR(prices, period);
+  const avgPrice = prices.slice(-period).reduce((a, b) => a + b, 0) / Math.min(period, prices.length);
+  return avgPrice > 0 ? atrVal / avgPrice : 0;
+}
+
+export function calculateEfficiencyRatio(prices: number[]): number {
+  if (prices.length < 20) return 0.5;
+  const recent = prices.slice(-20);
+  const direction = Math.abs(recent[recent.length - 1] - recent[0]);
+  let volatility = 0;
+  for (let i = 1; i < recent.length; i++) {
+    volatility += Math.abs(recent[i] - recent[i - 1]);
+  }
+  return volatility > 0 ? direction / volatility : 0;
+}
+
+export function calculateADX(prices: number[], period = 14): number {
+  if (prices.length < period * 2) return 25;
+  const upMoves: number[] = [];
+  const downMoves: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    upMoves.push(diff > 0 ? diff : 0);
+    downMoves.push(diff < 0 ? -diff : 0);
+  }
+  const smoothUp: number[] = [upMoves.slice(0, period).reduce((a, b) => a + b, 0) / period];
+  const smoothDown: number[] = [downMoves.slice(0, period).reduce((a, b) => a + b, 0) / period];
+  for (let i = period; i < upMoves.length; i++) {
+    smoothUp.push((smoothUp[smoothUp.length - 1] * (period - 1) + upMoves[i]) / period);
+    smoothDown.push((smoothDown[smoothDown.length - 1] * (period - 1) + downMoves[i]) / period);
+  }
+  const diPlus: number[] = [];
+  const diMinus: number[] = [];
+  for (let i = 0; i < smoothUp.length; i++) {
+    const sum = smoothUp[i] + smoothDown[i];
+    diPlus.push(sum > 0 ? (smoothUp[i] / sum) * 100 : 0);
+    diMinus.push(sum > 0 ? (smoothDown[i] / sum) * 100 : 0);
+  }
+  const dx: number[] = [];
+  for (let i = 0; i < diPlus.length; i++) {
+    const diff = Math.abs(diPlus[i] - diMinus[i]);
+    const sum = diPlus[i] + diMinus[i];
+    dx.push(sum > 0 ? (diff / sum) * 100 : 0);
+  }
+  if (dx.length < period) return 25;
+  const adxSlice = dx.slice(-period);
+  return adxSlice.reduce((a, b) => a + b, 0) / period;
 }

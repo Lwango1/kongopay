@@ -3,6 +3,7 @@
 
 import { fitSpikeIntervals, spikeProbability } from "./spikeIntervalModel";
 import { computeAdvancedFeatures } from "./advancedFeatures";
+import { calculateATR, calculateRSI } from "./indicators";
 
 export type IndexType = "BOOM" | "CRASH";
 
@@ -40,8 +41,6 @@ export interface TradeSignal {
   isConfirmed: boolean;
   confirmationPrice: number | null;
   indicators?: any;
-  regime?: any;
-  candlePatterns?: any[];
 }
 
 export interface Candlestick {
@@ -79,6 +78,22 @@ const candleMap30m = new Map<string, Candlestick[]>();
 const candleMap60m = new Map<string, Candlestick[]>();
 const candleMap120m = new Map<string, Candlestick[]>();
 const priceAt24hAgo = new Map<string, number>();
+
+// Suivi de performance des signaux pour seuils adaptatifs
+const signalPerformance = new Map<string, { total: number; wins: number; recentAccuracy: number; history: { win: boolean; timestamp: number }[] }>();
+
+export function recordSignalOutcome(indexKey: string, wasWin: boolean) {
+  const stats = signalPerformance.get(indexKey) || { total: 0, wins: 0, recentAccuracy: 0.55, history: [] };
+  stats.total++;
+  if (wasWin) stats.wins++;
+  stats.history.push({ win: wasWin, timestamp: Date.now() });
+  // Keep last 50 outcomes
+  if (stats.history.length > 50) stats.history.shift();
+  // Recent accuracy over last 20 signals
+  const recent = stats.history.slice(-20);
+  stats.recentAccuracy = recent.length > 0 ? recent.filter(h => h.win).length / recent.length : 0.55;
+  signalPerformance.set(indexKey, stats);
+}
 
 function initCandleMap(map: Map<string, Candlestick[]>) {
   for (const idx of INDICES) map.set(getKey(idx.type, idx.number), []);
@@ -404,7 +419,6 @@ export function getDerivState(): DerivSnapshot {
 }
 
 const CLUSTER_TOLERANCE = 0.002;
-const ATR_PERIOD = 14;
 
 interface SRLevel {
   price: number;
@@ -425,30 +439,6 @@ interface MarketStructure {
   lastBreakout: "bullish" | "bearish" | null;
   liquiditySwept: boolean;
   imbalance: number;
-}
-
-function atr(prices: number[], period: number = ATR_PERIOD): number {
-  if (prices.length < period + 1) return 0;
-  const recent = prices.slice(-period - 1);
-  let sum = 0;
-  for (let i = 1; i < recent.length; i++) {
-    sum += Math.abs(recent[i] - recent[i - 1]);
-  }
-  return sum / period;
-}
-
-function rsi(prices: number[], period: number = 14): number {
-  if (prices.length < period + 1) return 50;
-  const recent = prices.slice(-period - 1);
-  let gains = 0, losses = 0;
-  for (let i = 1; i < recent.length; i++) {
-    const diff = recent[i] - recent[i - 1];
-    if (diff > 0) gains += diff;
-    else losses -= diff;
-  }
-  if (losses === 0) return 100;
-  const rs = gains / losses;
-  return 100 - 100 / (1 + rs);
 }
 
 function findPivots(prices: number[], lookback: number = 3): { price: number; isHigh: boolean; strength: number }[] {
@@ -510,7 +500,7 @@ function findOrderBlocks(prices: number[]): OrderBlock[] {
   const recent = prices.slice(-200);
   if (recent.length < 30) return blocks;
 
-  const avgMove = atr(recent) / (recent.reduce((a, b) => a + b, 0) / recent.length);
+  const avgMove = calculateATR(recent) / (recent.reduce((a, b) => a + b, 0) / recent.length);
   const bodyThreshold = Math.max(avgMove * 1.5, 0.0008);
 
   for (let i = 5; i < recent.length - 5; i++) {
@@ -642,38 +632,13 @@ export function predictSpike(type: IndexType, num: number) {
 
   const history = st.history;
   const currentPrice = st.price;
-  const vol = atr(history);
-  const rsiVal = rsi(history);
+  const vol = calculateATR(history);
+  const rsiVal = calculateRSI(history);
   const market = analyzeMarketStructure(history);
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
   const orderBlocks = findOrderBlocks(history);
 
-  // --- Nouveaux indicateurs techniques (protégés) ---
-  let macdResult: any = null, bbResult: any = null, ichimokuResult: any = null;
-  let stochRsi = 50, adx = 25, trendStrength = 0, vwap = 0, vwapDistance = 0;
-  let regime = { volatility: "medium" as string, market: "ranging" as string, adx: 25, recommendation: "" };
-  let patternSignal = { signal: "neutral" as string, score: 0 };
-  let candlePatterns: { name: string; signal: string; strength: number }[] = [];
-  try {
-    macdResult = calculateMACD(history);
-    bbResult = calculateBollingerBands(history);
-    ichimokuResult = calculateIchimoku(history);
-    stochRsi = calculateStochasticRSI(history);
-    adx = calculateADXInternal(history);
-    trendStrength = detectTrendStrengthInternal(history);
-    regime = analyzeRegimeInternal(history);
-    vwap = calculateVWAP(history);
-    const candles15m = candleMap15m.get(key) || [];
-    candlePatterns = detectCandlestickPatterns(candles15m.map(c => ({ open: c.open, high: c.high, low: c.low, close: c.close })));
-    patternSignal = getPatternSignal(candlePatterns);
-  } catch (e) {
-    if (!isServer) console.warn("[Deriv] Erreur indicateurs techniques:", e);
-  }
-  // -----------------------------------------------
-
-  // --- Scoring spécifique au type d'indice ---
-  // Boom → opportunité à la hausse (support)
-  // Crash → opportunité à la baisse (résistance)
+  // --- Scoring Support / Résistance ---
   const isBoom = type === "BOOM";
   const isUp = isBoom;
   const refLevel = isBoom
@@ -683,151 +648,120 @@ export function predictSpike(type: IndexType, num: number) {
     ? (nearestSupport?.strength ?? 1)
     : (nearestResistance?.strength ?? 1);
 
-  const score = scoreSignal(currentPrice, refLevel, refStrength, history, isUp, rsiVal, market);
-  let bestScore = score.score;
+  // Détection des déséquilibres order blocks
+  const bestOB = orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01
+    ? orderBlocks[0]
+    : null;
 
-  // --- Ajustement par indicateurs techniques ---
-  let indicatorBonus = 0;
+  // Score de base : proximité du niveau S/R + force du niveau + market structure
+  const distanceToRef = Math.abs(currentPrice - refLevel) / (refLevel || currentPrice);
+  const proximity = Math.max(0, 1 - distanceToRef / 0.02); // 0-1, 1 = très proche
+  const levelStrengthScore = Math.min(refStrength / 8, 1) * 0.3;
 
-  // MACD confirmation
-  if (macdResult) {
-    const macdBullish = macdResult.histogram > 0 && macdResult.macd > macdResult.signal;
-    const macdBearish = macdResult.histogram < 0 && macdResult.macd < macdResult.signal;
-    if (isBoom && macdBullish) indicatorBonus += 0.05;
-    else if (!isBoom && macdBearish) indicatorBonus += 0.05;
-    else if (isBoom && macdBearish) indicatorBonus -= 0.03;
-    else if (!isBoom && macdBullish) indicatorBonus -= 0.03;
-  }
+  // Consecutive moves (exhaustion)
+  const recentMoves = history.slice(-15).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
+  const consecFiltered = recentMoves.slice(-5).filter(m => isUp ? m < 0 : m > 0);
+  const consecutive = consecFiltered.length;
+  const exhaustion = consecutive >= 4 ? 0.2 : 0;
 
-  // Bollinger Bands squeeze/breakout
-  if (bbResult) {
-    const nearLower = Math.abs(currentPrice - bbResult.lower) / bbResult.lower < 0.005;
-    const nearUpper = Math.abs(currentPrice - bbResult.upper) / bbResult.upper < 0.005;
-    const squeeze = bbResult.bandwidth < 0.05;
-    if (squeeze) indicatorBonus += 0.03;
-    if (isBoom && nearLower) indicatorBonus += 0.03;
-    if (!isBoom && nearUpper) indicatorBonus += 0.03;
-  }
+  // Market structure alignment
+  let marketScore = 0;
+  if (isUp && market.trend === "uptrend") marketScore = 0.12;
+  else if (!isUp && market.trend === "downtrend") marketScore = 0.12;
+  else if (market.trend === "ranging") marketScore = 0.06;
+  if (isUp && market.liquiditySwept && market.lastBreakout === "bullish") marketScore += 0.08;
+  else if (!isUp && market.liquiditySwept && market.lastBreakout === "bearish") marketScore += 0.08;
 
-  // Ichimoku confirmation
-  if (ichimokuResult) {
-    const tenkanAboveKijun = ichimokuResult.tenkan > ichimokuResult.kijun;
-    if (isBoom && currentPrice < ichimokuResult.senkouA && tenkanAboveKijun) indicatorBonus += 0.04;
-    if (!isBoom && currentPrice > ichimokuResult.senkouA && !tenkanAboveKijun) indicatorBonus += 0.04;
-  }
+  // RSI divergence simple
+  let rsiScore = 0;
+  if (isUp && rsiVal < 30) rsiScore = 0.12;
+  else if (!isUp && rsiVal > 70) rsiScore = 0.12;
+  else if (isUp && rsiVal < 40) rsiScore = 0.06;
+  else if (!isUp && rsiVal > 60) rsiScore = 0.06;
 
-  // StochRSI extrême
-  if (isBoom && stochRsi < 20) indicatorBonus += 0.04;
-  else if (!isBoom && stochRsi > 80) indicatorBonus += 0.04;
-  else if (isBoom && stochRsi > 80) indicatorBonus -= 0.03;
-  else if (!isBoom && stochRsi < 20) indicatorBonus -= 0.03;
+  // Order block bonus
+  const obBonus = bestOB ? Math.min(bestOB.strength / 5, 1) * 0.08 : 0;
 
-  // ADX trend strength (Boom: trend up, Crash: trend down)
-  if (adx > 25) {
-    if (isBoom && trendStrength > 10) indicatorBonus += 0.03;
-    else if (!isBoom && trendStrength < -10) indicatorBonus += 0.03;
-  }
-
-  // --- Ajustement par patterns de chandeliers ---
-  let patternBonus = 0;
-  if (isBoom && patternSignal.signal === "bullish") {
-    patternBonus = Math.min(patternSignal.score / 20, 0.05);
-  } else if (!isBoom && patternSignal.signal === "bearish") {
-    patternBonus = Math.min(Math.abs(patternSignal.score) / 20, 0.05);
-  } else if (isBoom && patternSignal.signal === "bearish") {
-    patternBonus = -0.03;
-  } else if (!isBoom && patternSignal.signal === "bullish") {
-    patternBonus = -0.03;
-  }
-
-  // --- Ajustement par régime de volatilité ---
-  let regimeBonus = 0;
-  if (isBoom && regime.market === "trending_bull") regimeBonus += 0.03;
-  else if (!isBoom && regime.market === "trending_bear") regimeBonus += 0.03;
-  else if (regime.market === "volatile") regimeBonus += 0.02;
-  else if (regime.market === "calm") regimeBonus -= 0.02;
-
-  // --- Features avancées (GARCH, Wavelet, Fourier) ---
-  let advancedBonus = 0;
-  try {
-    const adv = computeAdvancedFeatures(history);
-    if (adv.compositeScore > 0.6) advancedBonus += 0.06;
-    else if (adv.compositeScore > 0.4) advancedBonus += 0.03;
-    if (adv.garchVolRatio > 1.5) advancedBonus += 0.03; // Vol clustering
-    if (adv.waveletSpikeScore > 0.5) advancedBonus += 0.04; // Wavelet spike pattern
-    if (adv.fourierSpikeScore > 0.5) advancedBonus += 0.03; // Fourier periodicity
-    if (adv.dominantPeriod >= 5 && adv.dominantPeriod <= 15) advancedBonus += 0.02;
-  } catch (e) {
-    // Silently fail
-  }
-
-  bestScore = Math.min(bestScore + indicatorBonus + patternBonus + regimeBonus + advancedBonus, 1);
+  const bestScore = Math.min(proximity * 0.25 + marketScore + rsiScore + levelStrengthScore + exhaustion + obBonus, 1);
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   let probability = Math.min(Math.max(bestScore * 100, 20), 97);
 
-  // Multi-timeframe confirmation (30m, 1h, 2h)
+  // Confirmation multi-timeframe (S/R uniquement)
   const prices30m = candlePrices(candleMap30m, key);
   const prices60m = candlePrices(candleMap60m, key);
   const prices120m = candlePrices(candleMap120m, key);
   if (prices30m.length > 10) {
-    const rsi30m = rsi(prices30m);
     const market30m = analyzeMarketStructure(prices30m);
     const { nearestSupport: s30, nearestResistance: r30 } = findSupportResistance(prices30m, currentPrice);
     const ref30m = isBoom ? (s30?.price ?? Math.min(...prices30m.slice(-20))) : (r30?.price ?? Math.max(...prices30m.slice(-20)));
     const str30m = isBoom ? (s30?.strength ?? 1) : (r30?.strength ?? 1);
-    const score30m = scoreSignal(currentPrice, ref30m, str30m, prices30m, isUp, rsi30m, market30m);
-    if (score30m.score > 0.5) probability += 6;
+    const d30 = Math.abs(currentPrice - ref30m) / (ref30m || currentPrice);
+    const p30 = Math.max(0, 1 - d30 / 0.02);
+    const ms30 = isUp && market30m.trend === "uptrend" ? 1 : (!isUp && market30m.trend === "downtrend" ? 1 : 0.5);
+    const score30 = p30 * 0.25 + Math.min(str30m / 8, 1) * 0.3 + ms30 * 0.12;
+    if (score30 > 0.5) probability += 6;
     else probability -= 4;
   }
   if (prices60m.length > 10) {
-    const rsi60m = rsi(prices60m);
     const market60m = analyzeMarketStructure(prices60m);
     const { nearestSupport: s60, nearestResistance: r60 } = findSupportResistance(prices60m, currentPrice);
     const ref60m = isBoom ? (s60?.price ?? Math.min(...prices60m.slice(-20))) : (r60?.price ?? Math.max(...prices60m.slice(-20)));
     const str60m = isBoom ? (s60?.strength ?? 1) : (r60?.strength ?? 1);
-    const score60m = scoreSignal(currentPrice, ref60m, str60m, prices60m, isUp, rsi60m, market60m);
-    if (score60m.score > 0.5) probability += 4;
+    const d60 = Math.abs(currentPrice - ref60m) / (ref60m || currentPrice);
+    const p60 = Math.max(0, 1 - d60 / 0.02);
+    const ms60 = isUp && market60m.trend === "uptrend" ? 1 : (!isUp && market60m.trend === "downtrend" ? 1 : 0.5);
+    const score60 = p60 * 0.25 + Math.min(str60m / 8, 1) * 0.3 + ms60 * 0.12;
+    if (score60 > 0.5) probability += 4;
     else probability -= 3;
   }
   if (prices120m.length > 10) {
-    const rsi120m = rsi(prices120m);
     const market120m = analyzeMarketStructure(prices120m);
     const { nearestSupport: s120, nearestResistance: r120 } = findSupportResistance(prices120m, currentPrice);
     const ref120m = isBoom ? (s120?.price ?? Math.min(...prices120m.slice(-20))) : (r120?.price ?? Math.max(...prices120m.slice(-20)));
     const str120m = isBoom ? (s120?.strength ?? 1) : (r120?.strength ?? 1);
-    const score120m = scoreSignal(currentPrice, ref120m, str120m, prices120m, isUp, rsi120m, market120m);
-    if (score120m.score > 0.5) probability += 3;
+    const d120 = Math.abs(currentPrice - ref120m) / (ref120m || currentPrice);
+    const p120 = Math.max(0, 1 - d120 / 0.02);
+    const ms120 = isUp && market120m.trend === "uptrend" ? 1 : (!isUp && market120m.trend === "downtrend" ? 1 : 0.5);
+    const score120 = p120 * 0.25 + Math.min(str120m / 8, 1) * 0.3 + ms120 * 0.12;
+    if (score120 > 0.5) probability += 3;
     else probability -= 2;
   }
-  // Spike interval model: probabilité conditionnelle Weibull
+
+  // Spike interval model
   const spikeProb = spikeProbability(st.spikeIntervalModel, msSinceLastSpike, 60000);
   if (st.spikeIntervalModel.ready && st.spikeIntervalModel.sampleSize >= 3) {
-    // Ajustement non-linéaire: boost quand la probabilité dépasse le seuil de l'hazard rate
     const hazard = st.spikeIntervalModel.shape / Math.max(st.spikeIntervalModel.scale, 1);
     const threshold = Math.min(1 - Math.exp(-hazard * 60), 0.8);
     if (spikeProb > threshold) probability += 8;
     else if (spikeProb < threshold * 0.5) probability -= 5;
     else probability += 2;
   } else {
-    // Fallback linéaire si pas assez d'échantillons
     const timeFactor = Math.min(msSinceLastSpike / (30 * 60 * 1000), 1);
     probability += Math.round(timeFactor * 5);
   }
   probability = Math.min(Math.max(probability, 0), 97);
 
-  const volScale = vol > 0 ? Math.max((vol / (currentPrice || 1)) / 0.0005, 0.5) : 1;
+  // Features avancées (GARCH, Wavelet, Fourier) — bonus complémentaire
+  let advancedBonus = 0;
+  try {
+    const adv = computeAdvancedFeatures(history);
+    if (adv.compositeScore > 0.6) advancedBonus = 0.06;
+    else if (adv.compositeScore > 0.4) advancedBonus = 0.03;
+    if (adv.waveletSpikeScore > 0.5) advancedBonus += 0.03;
+    if (adv.fourierSpikeScore > 0.5) advancedBonus += 0.02;
+  } catch (e) {}
+  probability = Math.min(probability + advancedBonus * 100, 97);
 
-  // Ajustement SL/TP selon volatilité
+  // Volatilité
+  const volScale = vol > 0 ? Math.max((vol / (currentPrice || 1)) / 0.0005, 0.5) : 1;
+  const atrPercent = vol / (currentPrice || 1);
+
+  // Ajustement SL/TP
   let slMultiplier = 0.6;
   let tpMultiplier = 1.8;
-  if (regime.market === "volatile") {
-    slMultiplier = 0.8;
-    tpMultiplier = 2.2;
-  } else if (regime.market === "calm") {
-    slMultiplier = 0.4;
-    tpMultiplier = 1.4;
-  }
+  if (atrPercent > 0.002) { slMultiplier *= 1.2; tpMultiplier *= 1.3; }
+  else if (atrPercent < 0.0005) { slMultiplier *= 0.8; tpMultiplier *= 0.7; }
 
   const lookback = Math.min(history.length, 100);
   const recentHigh = Math.max(...history.slice(-lookback));
@@ -836,6 +770,7 @@ export function predictSpike(type: IndexType, num: number) {
   const magnitudePct = (0.008 + bestScore * 0.04) * (recentRange / 0.005) * volScale;
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
+  // Détection toucher de niveau
   let levelTouched = false;
   if (touchModeEnabled) {
     const touchThreshold = 0.0008;
@@ -857,102 +792,106 @@ export function predictSpike(type: IndexType, num: number) {
     levelTouched = true;
   }
 
-    // Approche predictive : velocity + divergence
-    let isApproaching = false;
-    let approachVelocity = 0;
-    const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
-    if (approachLevel) {
-      const recent = history.slice(-10);
-      let towardCount = 0;
-      for (let i = 1; i < recent.length; i++) {
-        const priceRise = recent[i] > recent[i - 1];
-        const levelAbove = approachLevel > currentPrice;
-        const movingToward = levelAbove ? priceRise : !priceRise;
-        if (movingToward) towardCount++;
-      }
-      const slice = history.slice(-8);
-      const slope = (slice[slice.length - 1] - slice[0]) / slice.length;
-      const avgPrice2 = (currentPrice + approachLevel) / 2 || 1;
-      const volScale2 = vol > 0 ? Math.max((vol / avgPrice2) / 0.0005, 0.5) : 1;
-      approachVelocity = Math.abs(slope) / avgPrice2 / volScale2;
-      const rsiRecent = rsi(history.slice(-30));
-      const rsiDivergence = (isBoom && rsiRecent < 40) || (!isBoom && rsiRecent > 60);
-      isApproaching = (towardCount >= 3 || approachVelocity > 0.3) || (towardCount >= 2 && rsiDivergence);
+  // Approche prédictive : le prix se dirige-t-il vers le niveau ?
+  let isApproaching = false;
+  let approachVelocity = 0;
+  const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
+  if (approachLevel) {
+    const recent = history.slice(-10);
+    let towardCount = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const priceRise = recent[i] > recent[i - 1];
+      const levelAbove = approachLevel > currentPrice;
+      if (levelAbove ? priceRise : !priceRise) towardCount++;
     }
+    const slice = history.slice(-8);
+    const slope = (slice[slice.length - 1] - slice[0]) / slice.length;
+    const avgPrice2 = (currentPrice + approachLevel) / 2 || 1;
+    const volScale2 = vol > 0 ? Math.max((vol / avgPrice2) / 0.0005, 0.5) : 1;
+    approachVelocity = Math.abs(slope) / avgPrice2 / volScale2;
+    isApproaching = towardCount >= 3 || approachVelocity > 0.3;
+  }
 
   const pricePos = nearestSupport && nearestResistance
     ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
     : 50;
 
   const expDir = isBoom ? "up" : "down";
-  const bestConsecutive = score.consecutive;
+
+  // Seuils adaptatifs
+  const perfKey = `${type}_${num}`;
+  const perfStats = signalPerformance.get(perfKey) || { total: 0, wins: 0, recentAccuracy: 0.55 };
+  const adaptiveBase = 0.55 + (perfStats.recentAccuracy - 0.5) * 0.3;
+  const strBuyThreshold = Math.min(75 + (1 - adaptiveBase) * 20, 88);
+  const buyThreshold = Math.min(68 + (1 - adaptiveBase) * 20, 82);
 
   let signal: Signal = "NEUTRAL";
-  if (probability >= 85) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
-  else if (probability >= 80) signal = isBoom ? "BUY" : "SELL";
+  if (probability >= strBuyThreshold) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
+  else if (probability >= buyThreshold) signal = isBoom ? "BUY" : "SELL";
+  else if (probability >= buyThreshold - 8 && levelTouched && bestScore > 0.6) {
+    signal = isBoom ? "BUY" : "SELL";
+  }
 
+  // Entry, SL, TP basés sur les niveaux S/R
   const predictive = isApproaching && !levelTouched;
+  const slDistance = Math.max(vol * slMultiplier, currentPrice * 0.002);
+  const tpDistance = Math.max(vol * tpMultiplier, slDistance * 2);
+
+  const dynamicSupport = nearestSupport?.price ?? currentPrice * 0.99;
+  const dynamicResistance = nearestResistance?.price ?? currentPrice * 1.01;
+
   let entryLevel: number;
   if (predictive) {
     entryLevel = isBoom
-      ? currentPrice * 0.998
-      : currentPrice * 1.002;
+      ? currentPrice * (1 - Math.min(atrPercent * 0.5, 0.002))
+      : currentPrice * (1 + Math.min(atrPercent * 0.5, 0.002));
+  } else if (levelTouched) {
+    entryLevel = isBoom
+      ? Math.min(dynamicSupport, currentPrice * 0.998)
+      : Math.max(dynamicResistance, currentPrice * 1.002);
   } else {
     entryLevel = isBoom
-      ? Math.min(nearestSupport?.price ?? currentPrice * 0.99, currentPrice * 0.998)
-      : Math.max(nearestResistance?.price ?? currentPrice * 1.01, currentPrice * 1.002);
+      ? Math.min(dynamicSupport * 0.999, currentPrice * (1 - atrPercent * 0.3))
+      : Math.max(dynamicResistance * 1.001, currentPrice * (1 + atrPercent * 0.3));
   }
 
-  const slBuffer = vol * slMultiplier;
-  const tpBuffer = vol * tpMultiplier;
-
   const stopLoss = isBoom
-    ? (predictive ? entryLevel * 0.998 : Math.min(entryLevel * 0.996, entryLevel - slBuffer))
-    : (predictive ? entryLevel * 1.002 : Math.max(entryLevel * 1.004, entryLevel + slBuffer));
+    ? Math.min(entryLevel - slDistance, dynamicSupport * (1 - atrPercent))
+    : Math.max(entryLevel + slDistance, dynamicResistance * (1 + atrPercent));
 
-  const tpTarget = predictive ? vol * 1.2 : vol * 0.8;
   const takeProfit = isBoom
-    ? Math.max(entryLevel + tpTarget, currentPrice + tpTarget)
-    : Math.min(entryLevel - tpTarget, currentPrice - tpTarget);
+    ? Math.max(entryLevel + tpDistance, currentPrice + tpDistance)
+    : Math.min(entryLevel - tpDistance, currentPrice - tpDistance);
 
+  // Confirmation
   let isConfirmed = false;
   let confirmationPrice: number | null = null;
-
   if (signal !== "NEUTRAL") {
     const prevSig = st.prevSignal;
     const isBuy = isBoom;
     const currentSig = isBuy ? (signal === "STRONG_BUY" ? "STRONG_BUY" : "BUY") : (signal === "STRONG_SELL" ? "STRONG_SELL" : "SELL");
-    const sigChanged = prevSig !== currentSig;
-
-    if (sigChanged) {
+    if (prevSig !== currentSig) {
       st.prevSignal = currentSig;
       st.prevSignalPrice = currentPrice;
       st.prevSignalTime = Date.now();
       st.confirmationTriggered = false;
     }
-
     const priceChange = (currentPrice - st.prevSignalPrice) / st.prevSignalPrice;
     const confirmThreshold = Math.max(vol / currentPrice * 0.5, 0.0008);
-
     if (!st.confirmationTriggered) {
       if (isBuy && priceChange >= confirmThreshold) {
-        isConfirmed = true;
-        confirmationPrice = currentPrice;
-        st.confirmationTriggered = true;
+        isConfirmed = true; confirmationPrice = currentPrice; st.confirmationTriggered = true;
       } else if (!isBuy && priceChange <= -confirmThreshold) {
-        isConfirmed = true;
-        confirmationPrice = currentPrice;
-        st.confirmationTriggered = true;
+        isConfirmed = true; confirmationPrice = currentPrice; st.confirmationTriggered = true;
       }
     } else {
-      isConfirmed = true;
-      confirmationPrice = st.prevSignalPrice;
+      isConfirmed = true; confirmationPrice = st.prevSignalPrice;
     }
   }
 
-  const bestRef = orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01
-    ? { level: orderBlocks[0].price, strength: orderBlocks[0].strength }
-    : { level: score.referenceLevel, strength: score.referenceStrength };
+  const bestRef = bestOB
+    ? { level: bestOB.price, strength: bestOB.strength }
+    : { level: refLevel, strength: refStrength };
 
   return {
     type, number: num, currentPrice,
@@ -961,12 +900,11 @@ export function predictSpike(type: IndexType, num: number) {
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
     isSpikeImminent: probability >= (volScale > 1.5 ? 72 : 75) && (levelTouched || isApproaching),
-    levelTouched,
-    isApproaching,
+    levelTouched, isApproaching,
     approachVelocity: Math.round(approachVelocity * 100) / 100,
     volScale: Math.round(volScale * 100) / 100,
     pricePosition: pricePos,
-    consecutiveMoves: bestConsecutive,
+    consecutiveMoves: consecutive,
     rangeLow: nearestSupport?.price ?? currentPrice * 0.98,
     rangeHigh: nearestResistance?.price ?? currentPrice * 1.02,
     referenceLevel: Math.round(bestRef.level * 100) / 100,
@@ -974,218 +912,14 @@ export function predictSpike(type: IndexType, num: number) {
     distancePercent: Math.round(Math.abs(currentPrice - bestRef.level) / (bestRef.level || currentPrice) * 10000) / 100,
     sRlevels: allLevels.slice(0, 6).map(l => ({ price: Math.round(l.price * 100) / 100, strength: l.strength, type: l.type })),
     orderBlocks: orderBlocks.slice(0, 4).map(ob => ({ price: Math.round(ob.price * 100) / 100, type: ob.type, strength: ob.strength })),
-    upScore: Math.round(score.score * 100),
-    downScore: Math.round((1 - score.score) * 100),
-    connected: st.connected,
-    timestamp: Date.now(),
-    signal,
-    entryPrice: Math.round(entryLevel * 100) / 100,
+    upScore: Math.round(bestScore * 100),
+    downScore: Math.round((1 - bestScore) * 100),
+    connected: st.connected, timestamp: Date.now(),
+    signal, entryPrice: Math.round(entryLevel * 100) / 100,
     stopLoss: Math.round(stopLoss * 100) / 100,
     takeProfit: Math.round(takeProfit * 100) / 100,
-    isConfirmed,
-    confirmationPrice: confirmationPrice ? Math.round(confirmationPrice * 100) / 100 : null,
-    // Nouveaux champs pour analyse
-    indicators: {
-      macd: macdResult ? { histogram: Math.round(macdResult.histogram * 10000) / 10000, signal: Math.round(macdResult.signal * 100) / 100, macd: Math.round(macdResult.macd * 100) / 100 } : null,
-      bollinger: bbResult ? { bandwidth: Math.round(bbResult.bandwidth * 10000) / 10000, upper: Math.round(bbResult.upper * 100) / 100, lower: Math.round(bbResult.lower * 100) / 100 } : null,
-      ichimoku: ichimokuResult ? { tenkan: Math.round(ichimokuResult.tenkan * 100) / 100, kijun: Math.round(ichimokuResult.kijun * 100) / 100, senkouA: Math.round(ichimokuResult.senkouA * 100) / 100, senkouB: Math.round(ichimokuResult.senkouB * 100) / 100 } : null,
-      stochRsi: Math.round(stochRsi * 100) / 100,
-      adx: Math.round(adx * 10) / 10,
-      trendStrength: Math.round(trendStrength * 10) / 10,
-      vwapDistance: Math.round(vwapDistance * 10000) / 10000,
-    },
-    regime: {
-      volatility: regime.volatility,
-      market: regime.market,
-      adx: regime.adx,
-      recommendation: regime.recommendation,
-    },
-    candlePatterns: candlePatterns.slice(0, 3).map(p => ({ name: p.name, signal: p.signal, strength: p.strength })),
+    isConfirmed, confirmationPrice: confirmationPrice ? Math.round(confirmationPrice * 100) / 100 : null,
   };
-}
-
-// Fonctions helper internes (sans import pour éviter les dépendances circulaires)
-function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } | null {
-  if (prices.length < 35) return null;
-  const fastPeriod = 12, slowPeriod = 26, signalPeriod = 9;
-  const multiplierFast = 2 / (fastPeriod + 1);
-  const multiplierSlow = 2 / (slowPeriod + 1);
-  const fastEMA: number[] = [];
-  const slowEMA: number[] = [];
-  const sumFast = prices.slice(0, fastPeriod).reduce((a, b) => a + b, 0);
-  const sumSlow = prices.slice(0, slowPeriod).reduce((a, b) => a + b, 0);
-  fastEMA.push(sumFast / fastPeriod);
-  slowEMA.push(sumSlow / slowPeriod);
-  for (let i = fastPeriod; i < prices.length; i++) fastEMA.push((prices[i] - fastEMA[fastEMA.length - 1]) * multiplierFast + fastEMA[fastEMA.length - 1]);
-  for (let i = slowPeriod; i < prices.length; i++) slowEMA.push((prices[i] - slowEMA[slowEMA.length - 1]) * multiplierSlow + slowEMA[slowEMA.length - 1]);
-  const offset = fastEMA.length - slowEMA.length;
-  const macdLine: number[] = [];
-  for (let i = 0; i < slowEMA.length; i++) macdLine.push(fastEMA[offset + i] - slowEMA[i]);
-  const multiplierSignal = 2 / (signalPeriod + 1);
-  const signalLine: number[] = [macdLine.slice(0, signalPeriod).reduce((a, b) => a + b, 0) / signalPeriod];
-  for (let i = signalPeriod; i < macdLine.length; i++) signalLine.push((macdLine[i] - signalLine[signalLine.length - 1]) * multiplierSignal + signalLine[signalLine.length - 1]);
-  const lastMacd = macdLine[macdLine.length - 1];
-  const lastSignal = signalLine[signalLine.length - 1];
-  return { macd: lastMacd, signal: lastSignal, histogram: lastMacd - lastSignal };
-}
-
-function calculateBollingerBands(prices: number[]): { upper: number; middle: number; lower: number; bandwidth: number } | null {
-  const period = 20;
-  if (prices.length < period) return null;
-  const slice = prices.slice(-period);
-  const middle = slice.reduce((a, b) => a + b, 0) / period;
-  const variance = slice.reduce((sum, p) => sum + (p - middle) ** 2, 0) / period;
-  const stdDev = Math.sqrt(variance);
-  return { upper: middle + stdDev * 2, middle, lower: middle - stdDev * 2, bandwidth: (stdDev * 4) / middle };
-}
-
-function calculateIchimoku(prices: number[]): { tenkan: number; kijun: number; senkouA: number; senkouB: number } | null {
-  if (prices.length < 52) return null;
-  const tenkan = (Math.max(...prices.slice(-9)) + Math.min(...prices.slice(-9))) / 2;
-  const kijun = (Math.max(...prices.slice(-26)) + Math.min(...prices.slice(-26))) / 2;
-  const senkouA = (tenkan + kijun) / 2;
-  const senkouB = (Math.max(...prices.slice(-52)) + Math.min(...prices.slice(-52))) / 2;
-  return { tenkan, kijun, senkouA, senkouB };
-}
-
-function calculateStochasticRSI(prices: number[]): number {
-  const rsiValues: number[] = [];
-  for (let i = 14; i < prices.length; i++) {
-    const slice = prices.slice(i - 14, i + 1);
-    if (slice.length < 15) continue;
-    let gains = 0, losses = 0;
-    for (let j = 1; j < slice.length; j++) {
-      const diff = slice[j] - slice[j - 1];
-      if (diff > 0) gains += diff; else losses -= diff;
-    }
-    if (losses === 0) rsiValues.push(100);
-    else rsiValues.push(100 - 100 / (1 + gains / losses));
-  }
-  if (rsiValues.length < 14) return 50;
-  const recent = rsiValues.slice(-14);
-  const minR = Math.min(...recent);
-  const maxR = Math.max(...recent);
-  return maxR === minR ? 50 : ((rsiValues[rsiValues.length - 1] - minR) / (maxR - minR)) * 100;
-}
-
-function calculateADXInternal(prices: number[]): number {
-  if (prices.length < 28) return 25;
-  const upMoves: number[] = [];
-  const downMoves: number[] = [];
-  for (let i = 1; i < prices.length; i++) {
-    const diff = prices[i] - prices[i - 1];
-    upMoves.push(diff > 0 ? diff : 0);
-    downMoves.push(diff < 0 ? -diff : 0);
-  }
-  const period = 14;
-  const smoothUp: number[] = [upMoves.slice(0, period).reduce((a, b) => a + b, 0) / period];
-  const smoothDown: number[] = [downMoves.slice(0, period).reduce((a, b) => a + b, 0) / period];
-  for (let i = period; i < upMoves.length; i++) {
-    smoothUp.push((smoothUp[smoothUp.length - 1] * (period - 1) + upMoves[i]) / period);
-    smoothDown.push((smoothDown[smoothDown.length - 1] * (period - 1) + downMoves[i]) / period);
-  }
-  const diPlus: number[] = [];
-  const diMinus: number[] = [];
-  for (let i = 0; i < smoothUp.length; i++) {
-    const sum = smoothUp[i] + smoothDown[i];
-    diPlus.push(sum > 0 ? (smoothUp[i] / sum) * 100 : 0);
-    diMinus.push(sum > 0 ? (smoothDown[i] / sum) * 100 : 0);
-  }
-  const dx: number[] = [];
-  for (let i = 0; i < diPlus.length; i++) {
-    const diff = Math.abs(diPlus[i] - diMinus[i]);
-    const sum = diPlus[i] + diMinus[i];
-    dx.push(sum > 0 ? (diff / sum) * 100 : 0);
-  }
-  if (dx.length < period) return 25;
-  const adxSlice = dx.slice(-period);
-  return adxSlice.reduce((a, b) => a + b, 0) / period;
-}
-
-function detectTrendStrengthInternal(prices: number[]): number {
-  if (prices.length < 40) return 0;
-  const short = prices.slice(-10);
-  const long = prices.slice(-40);
-  const shortSlope = (short[short.length - 1] - short[0]) / short.length;
-  const longSlope = (long[long.length - 1] - long[0]) / long.length;
-  const basePrice = long.reduce((a, b) => a + b, 0) / long.length || 1;
-  if (shortSlope > 0 && longSlope > 0) return ((shortSlope / basePrice) * 100 + (longSlope / basePrice) * 25) * 10;
-  if (shortSlope < 0 && longSlope < 0) return -((Math.abs(shortSlope / basePrice) * 100 + Math.abs(longSlope / basePrice) * 25) * 10);
-  return 0;
-}
-
-function analyzeRegimeInternal(prices: number[]): { volatility: string; market: string; adx: number; recommendation: string } {
-  if (prices.length < 50) return { volatility: "medium", market: "ranging", adx: 25, recommendation: "Données insuffisantes" };
-  const atr14 = atr(prices, 14);
-  const atr50 = atr(prices, 50);
-  const volatility = atr50 > 0 ? (atr14 / atr50 > 1.5 ? "high" : atr14 / atr50 < 0.7 ? "low" : "medium") : "medium";
-  const adxVal = calculateADXInternal(prices);
-  const trendStrength = detectTrendStrengthInternal(prices);
-  let market: string;
-  let recommendation: string;
-
-  if (adxVal > 25 && trendStrength > 15) {
-    market = "trending_bull";
-    recommendation = "Tendance haussière détectée";
-  } else if (adxVal > 25 && trendStrength < -15) {
-    market = "trending_bear";
-    recommendation = "Tendance baissière détectée";
-  } else if (volatility === "high") {
-    market = "volatile";
-    recommendation = "Volatilité élevée, stops larges recommandés";
-  } else if (adxVal < 20) {
-    market = "calm";
-    recommendation = "Marché calme, attendre confirmation";
-  } else {
-    market = "ranging";
-    recommendation = "Marché range, scalping recommandé";
-  }
-
-  return { volatility, market, adx: Math.round(adxVal * 10) / 10, recommendation };
-}
-
-function calculateVWAP(prices: number[]): number {
-  if (prices.length === 0) return 0;
-  const total = prices.reduce((sum, p, i) => sum + p * (i + 1), 0);
-  const vol = (prices.length * (prices.length + 1)) / 2;
-  return total / vol;
-}
-
-function detectCandlestickPatterns(candles: { open: number; high: number; low: number; close: number }[]): { name: string; signal: string; strength: number }[] {
-  if (candles.length < 3) return [];
-  const patterns: { name: string; signal: string; strength: number }[] = [];
-  const curr = candles[candles.length - 1];
-  const prev = candles[candles.length - 2];
-
-  const body = Math.abs(curr.close - curr.open);
-  const range = curr.high - curr.low;
-  const isDoji = range > 0 && body / range < 0.001;
-  if (isDoji) patterns.push({ name: "Doji", signal: "neutral", strength: 1 });
-
-  const lowerWick = Math.min(curr.open, curr.close) - curr.low;
-  const upperWick = curr.high - Math.max(curr.open, curr.close);
-  const isHammer = range > 0 && body < range * 0.3 && lowerWick > body * 2 && upperWick < body * 0.5;
-  if (isHammer) patterns.push({ name: "Hammer", signal: "bullish", strength: 3 });
-
-  const isShootingStar = range > 0 && body < range * 0.3 && upperWick > body * 2 && lowerWick < body * 0.5;
-  if (isShootingStar) patterns.push({ name: "Shooting Star", signal: "bearish", strength: 3 });
-
-  const isBullEngulf = prev.close < prev.open && curr.close > curr.open && curr.open < prev.close && curr.close > prev.open;
-  if (isBullEngulf) patterns.push({ name: "Bullish Engulfing", signal: "bullish", strength: 3 });
-
-  const isBearEngulf = prev.close > prev.open && curr.close < curr.open && curr.open > prev.close && curr.close < prev.open;
-  if (isBearEngulf) patterns.push({ name: "Bearish Engulfing", signal: "bearish", strength: 3 });
-
-  return patterns;
-}
-
-function getPatternSignal(patterns: { name: string; signal: string; strength: number }[]): { signal: string; score: number } {
-  let score = 0;
-  for (const p of patterns) {
-    if (p.signal === "bullish") score += p.strength;
-    else if (p.signal === "bearish") score -= p.strength;
-  }
-  return { signal: score > 2 ? "bullish" : score < -2 ? "bearish" : "neutral", score };
 }
 
 export function predictNextTick(type: IndexType, num: number) {
@@ -1258,8 +992,6 @@ export interface MarketOpportunity {
   connected: boolean;
   timestamp: number;
   indicators?: any;
-  regime?: any;
-  candlePatterns?: any[];
 }
 
 export interface MarketScanResult {
@@ -1311,8 +1043,6 @@ export function scanAllMarkets(): MarketScanResult {
       stopLoss: prediction.stopLoss,
       takeProfit: prediction.takeProfit,
       volScale: prediction.volScale,
-      regime: prediction.regime,
-      candlePatterns: prediction.candlePatterns,
       connected: prediction.connected,
       timestamp: prediction.timestamp,
     });

@@ -62,24 +62,80 @@ class LSTMPredictionService {
     console.log('[LSTM] Modèle LSTM construit:', `${SEQ_LENGTH}×${NUM_FEATURES} → 32→16→8→3`);
   }
 
+  // Compute RSI from a slice of prices
+  _calcRSI(prices) {
+    if (prices.length < 15) return 50;
+    let gains = 0, losses = 0;
+    for (let i = 1; i < prices.length; i++) {
+      const diff = prices[i] - prices[i - 1];
+      if (diff > 0) gains += diff;
+      else losses -= diff;
+    }
+    if (losses === 0) return 100;
+    return 100 - 100 / (1 + gains / losses);
+  }
+
+  // Compute ATR from a slice of prices
+  _calcATR(prices, period = 14) {
+    if (prices.length < period + 1) return 0;
+    let sum = 0;
+    for (let i = prices.length - period; i < prices.length; i++) {
+      sum += Math.abs(prices[i] - prices[i - 1]);
+    }
+    return sum / period;
+  }
+
   // Build features from recent price history
-  buildSequence(prices, indicators) {
+  buildSequence(prices) {
     if (prices.length < SEQ_LENGTH + 1) return null;
 
     const seq = [];
     for (let t = prices.length - SEQ_LENGTH; t < prices.length; t++) {
       const priceChange = t > 0 ? (prices[t] - prices[t - 1]) / (prices[t - 1] || 1) : 0;
+
+      // Compute indicators from price history up to time t
+      const priceSlice = prices.slice(Math.max(0, t - 20), t + 1);
+      const rsi = this._calcRSI(priceSlice);
+      const atr = this._calcATR(priceSlice);
+      const avgPrice = priceSlice.reduce((a, b) => a + b, 0) / priceSlice.length;
+      const atrRatio = avgPrice > 0 ? atr / avgPrice : 0;
+
+      // Momentum: avg change over last 5 ticks
+      const recent5 = priceSlice.slice(-5);
+      const momentum = recent5.length > 1
+        ? (recent5[recent5.length - 1] - recent5[0]) / recent5.length / (avgPrice || 1)
+        : 0;
+
+      // SR distance: distance from current price to recent min/max
+      const periodMin = Math.min(...priceSlice);
+      const periodMax = Math.max(...priceSlice);
+      const range = periodMax - periodMin || 1;
+      const srDistance = (prices[t] - periodMin) / range;
+
+      // Consecutive moves in same direction
+      let consec = 0;
+      for (let i = t; i > Math.max(1, t - 5); i--) {
+        if ((prices[i] - prices[i - 1]) * (priceChange >= 0 ? 1 : -1) > 0) consec++;
+        else break;
+      }
+      const consecutiveMoves = Math.min(consec / 5, 1);
+
+      // Volatility regime: recent ATR / medium-term ATR
+      const atrShort = this._calcATR(priceSlice, 7);
+      const atrLong = this._calcATR(priceSlice, 20);
+      const volRegime = atrLong > 0 ? Math.min(atrShort / atrLong, 2) / 2 : 0.5;
+
       seq.push([
-        priceChange,
-        indicators.rsiAtTime ? indicators.rsiAtTime(t) : 0.5,
-        indicators.atrRatioAtTime ? indicators.atrRatioAtTime(t) : 0.5,
-        indicators.momentumAtTime ? indicators.momentumAtTime(t) : 0,
-        indicators.srDistanceAtTime ? indicators.srDistanceAtTime(t) : 0.5,
-        indicators.consecutiveMovesAtTime ? indicators.consecutiveMovesAtTime(t) : 0,
-        indicators.volumeRatioAtTime ? indicators.volumeRatioAtTime(t) : 0.5,
-        indicators.volRegimeAtTime ? indicators.volRegimeAtTime(t) : 0.5,
-        indicators.timeSinceSpikeAtTime ? indicators.timeSinceSpikeAtTime(t) : 0.5,
-        indicators.advancedCompositeAtTime ? indicators.advancedCompositeAtTime(t) : 0.5,
+        Math.tanh(priceChange * 100),      // price_change (normalized)
+        rsi / 100,                          // rsi
+        Math.min(atrRatio * 1000, 1),       // atr_ratio
+        Math.tanh(momentum * 100),          // momentum
+        srDistance,                         // sr_distance
+        consecutiveMoves,                   // consecutive_moves
+        0.5,                                // volume_ratio (no volume data)
+        volRegime,                          // volatility_regime
+        0.5,                                // time_since_spike
+        0.5,                                // advanced_composite
       ]);
     }
     return seq;
@@ -98,24 +154,12 @@ class LSTMPredictionService {
 
     for (const doc of snapshot.docs) {
       const s = doc.data();
-      if (!s.features || !s.priceHistory) continue;
+      if (!s.priceHistory) continue;
 
       const prices = s.priceHistory;
       if (prices.length < SEQ_LENGTH + 1) continue;
 
-      // Build features at signal time
-      const seq = this.buildSequence(prices, {
-        rsiAtTime: (t) => s.features.rsiAtTime?.[t] ?? 0.5,
-        atrRatioAtTime: (t) => s.features.atrRatioAtTime?.[t] ?? 0.5,
-        momentumAtTime: (t) => s.features.momentumAtTime?.[t] ?? 0,
-        srDistanceAtTime: (t) => s.features.srDistAtTime?.[t] ?? 0.5,
-        consecutiveMovesAtTime: (t) => s.features.consecAtTime?.[t] ?? 0,
-        volumeRatioAtTime: (t) => 0.5,
-        volRegimeAtTime: (t) => 0.5,
-        timeSinceSpikeAtTime: (t) => t > 0 ? Math.min(t / 100, 1) : 0,
-        advancedCompositeAtTime: (t) => 0.5,
-      });
-
+      const seq = this.buildSequence(prices);
       if (!seq) continue;
       xs.push(seq);
 
@@ -184,10 +228,10 @@ class LSTMPredictionService {
     };
   }
 
-  // Real-time sequence builder from current state
-  buildCurrentSequence(prices, indicators) {
+  // Real-time sequence builder from current price history
+  buildCurrentSequence(prices) {
     if (prices.length < SEQ_LENGTH + 1) return null;
-    return this.buildSequence(prices, indicators);
+    return this.buildSequence(prices);
   }
 
   async saveModel() {
