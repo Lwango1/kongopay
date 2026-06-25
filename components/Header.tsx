@@ -11,7 +11,9 @@ const NAV_ITEMS = [
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
   { label: "Performance", href: "/performance" },
+  { label: "Blog", href: "/blog" },
   { label: "Apprendre", href: "/apprendre" },
+  { label: "À propos", href: "/a-propos" },
 ];
 
 export default function Header() {

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { initDerivClient, scanAllMarkets } from "@/lib/deriv";
 import type { MarketScanResult, MarketOpportunity } from "@/lib/deriv";
+import { saveSignal, checkAndResolveSignals, getSignalStats } from "@/lib/signalStore";
 
 type Opportunity = MarketOpportunity;
 type ScanResult = MarketScanResult;
@@ -20,6 +21,8 @@ const INDICES_CONFIG: Record<string, { color: string; bgColor: string }> = {
   "Crash 900": { color: "#f43f5e", bgColor: "rgba(244,63,94,0.1)" },
   "Crash 1000": { color: "#be123c", bgColor: "rgba(190,18,60,0.1)" },
 };
+
+const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
 
 function AlertBanner({ opportunity }: { opportunity: Opportunity }) {
   const cfg = INDICES_CONFIG[opportunity.label];
@@ -131,7 +134,7 @@ export default function MarketScanner() {
     } catch { /* audio not available */ }
   }, [soundEnabled]);
 
-  const fetchScan = useCallback(() => {
+  const fetchScan = useCallback(async () => {
     if (pausedRef.current) return;
     try {
       const data = scanAllMarkets();
@@ -155,8 +158,38 @@ export default function MarketScanner() {
           const newOpps = data.opportunities.filter(o =>
             newAlerts.includes(`${o.type}_${o.number}`)
           );
+          for (const opp of newOpps) {
+            await saveSignal({
+              key: `${opp.type}_${opp.number}`,
+              label: opp.label,
+              type: opp.type,
+              number: opp.number,
+              direction: opp.expectedDirection,
+              probability: opp.spikeProbability,
+              entryPrice: opp.entryPrice ?? opp.currentPrice,
+              stopLoss: opp.stopLoss ?? 0,
+              takeProfit: opp.takeProfit ?? 0,
+              magnitude: opp.estimatedMagnitude,
+              timeSinceLastSpike: opp.timeSinceLastSpike,
+              detectedAt: Date.now(),
+              expiredAt: Date.now() + SIGNAL_EXPIRY_MS,
+              resolvedAt: null,
+              result: "active",
+              exitPrice: null,
+              exitReason: null,
+              currentPriceAtExpiry: null,
+              maxFavorable: 0,
+              maxAdverse: 0,
+            });
+          }
           setAlertHistory(prev2 => [...newOpps, ...prev2].slice(0, 50));
         }
+
+        const getPrice = (key: string) => {
+          const opp = data.opportunities.find((o: any) => `${o.type}_${o.number}` === key);
+          return opp?.currentPrice ?? null;
+        };
+        await checkAndResolveSignals(getPrice);
         previousImminentRef.current = imminentKeys;
       } else {
         setWaitingData(true);
@@ -170,6 +203,20 @@ export default function MarketScanner() {
     const interval = setInterval(fetchScan, 1000);
     return () => { clearTimeout(initialTimer); clearInterval(interval); };
   }, [fetchScan]);
+
+  const [marketStats, setMarketStats] = useState<Record<string, { total: number; wins: number; winRate: number }>>({});
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        const stats = await getSignalStats();
+        setMarketStats(stats.byMarket);
+      } catch {}
+    };
+    loadStats();
+    const interval = setInterval(loadStats, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   const [showAll, setShowAll] = useState(false);
   const imminentOpps = result?.opportunities.filter(o => o.isSpikeImminent) ?? [];
@@ -247,15 +294,16 @@ export default function MarketScanner() {
           <div className="rounded-xl border border-border bg-surface overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border text-xs text-text-muted uppercase">
-                    <th className="text-left px-4 py-3 font-semibold">Marché</th>
-                    <th className="text-right px-4 py-3 font-semibold">Probabilité</th>
-                    <th className="text-right px-4 py-3 font-semibold">Direction</th>
-                    <th className="text-right px-4 py-3 font-semibold">Ampleur</th>
-                    <th className="text-right px-4 py-3 font-semibold">Dernier spike</th>
-                  </tr>
-                </thead>
+                  <thead>
+                    <tr className="border-b border-border text-xs text-text-muted uppercase">
+                      <th className="text-left px-4 py-3 font-semibold">Marché</th>
+                      <th className="text-right px-4 py-3 font-semibold">Probabilité</th>
+                      <th className="text-right px-4 py-3 font-semibold">Fiabilité</th>
+                      <th className="text-right px-4 py-3 font-semibold">Direction</th>
+                      <th className="text-right px-4 py-3 font-semibold">Ampleur</th>
+                      <th className="text-right px-4 py-3 font-semibold">Dernier spike</th>
+                    </tr>
+                  </thead>
                 <tbody>
                   {displayedOpps.map((opp) => {
                     const cfg = INDICES_CONFIG[opp.label] ?? { color: "#94a3b8", bgColor: "rgba(148,163,184,0.1)" };
@@ -287,6 +335,19 @@ export default function MarketScanner() {
                             </div>
                             <span className="font-mono text-xs font-bold" style={{ color: probColor }}>{opp.spikeProbability}%</span>
                           </div>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          {(() => {
+                            const ms = marketStats[`${opp.type}_${opp.number}`];
+                            if (!ms || ms.total < 3) return <span className="text-xs text-text-muted">—</span>;
+                            const relColor = ms.winRate >= 70 ? "text-success" : ms.winRate >= 50 ? "text-warning" : "text-danger";
+                            return (
+                              <span className={`font-mono text-xs font-bold ${relColor}`}>
+                                {ms.winRate.toFixed(0)}%
+                                <span className="text-text-muted font-normal"> ({ms.wins}/{ms.total})</span>
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className={`px-4 py-3 text-right font-semibold capitalize ${opp.expectedDirection === "up" ? "text-success" : "text-danger"}`}>
                           {opp.expectedDirection === "up" ? "Hausse ↗" : "Baisse ↘"}
@@ -339,8 +400,14 @@ export default function MarketScanner() {
                       <p className="text-lg font-bold font-mono text-danger mt-1">{opp.downScore}%</p>
                     </div>
                     <div className="rounded-lg bg-background border border-border p-3">
-                      <p className="text-[10px] text-text-muted uppercase font-semibold">Mouvements consécutifs</p>
-                      <p className="text-lg font-bold font-mono mt-1">{opp.consecutiveMoves}/5</p>
+                      <p className="text-[10px] text-text-muted uppercase font-semibold">Fiabilité réelle</p>
+                      <p className="text-lg font-bold font-mono mt-1">
+                        {(() => {
+                          const ms = marketStats[`${opp.type}_${opp.number}`];
+                          if (!ms || ms.total < 3) return <span className="text-text-muted">—</span>;
+                          return <span className={ms.winRate >= 70 ? "text-success" : ms.winRate >= 50 ? "text-warning" : "text-danger"}>{ms.winRate.toFixed(0)}% ({ms.wins}/{ms.total})</span>;
+                        })()}
+                      </p>
                     </div>
                     <div className="rounded-lg bg-background border border-border p-3">
                       <p className="text-[10px] text-text-muted uppercase font-semibold">Distance du niveau</p>
