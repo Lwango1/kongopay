@@ -26,50 +26,65 @@ const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
 
 function AlertBanner({ opportunity }: { opportunity: Opportunity }) {
   const cfg = INDICES_CONFIG[opportunity.label];
+  const sr = opportunity.srAlert;
+  const srLabel = sr?.srAlertType === "touched" ? "Niveau touché"
+    : sr?.srAlertType === "approaching" ? "Approche S/R"
+    : "Opportunité";
+
+  const alertColor = sr?.srAlertType === "touched" ? "text-danger border-danger/40 bg-danger/10"
+    : sr?.srAlertType === "approaching" ? "text-primary border-primary/40 bg-primary/10"
+    : "text-yellow-400 border-yellow-400/40 bg-yellow-400/10";
+
+  const pulseClass = sr?.srAlertType === "touched" ? "animate-pulse" : "";
+
   return (
-    <div className="p-4 rounded-xl border border-danger/40 bg-danger/10 animate-pulse">
+    <div className={`p-4 rounded-xl border ${alertColor} ${pulseClass}`}>
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-danger/20 flex items-center justify-center">
-          <AlertTriangle size={20} className="text-danger" />
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${sr?.srAlertType === "approaching" ? "bg-primary/20" : "bg-danger/20"}`}>
+          {sr?.srAlertType === "approaching" ? (
+            <TrendingUp size={20} className="text-primary" />
+          ) : (
+            <AlertTriangle size={20} className="text-danger" />
+          )}
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-danger">Opportunité détectée !</span>
+            <span className="text-lg font-bold">{srLabel} !</span>
             {opportunity.expectedDirection === "up" ? (
               <ArrowUp size={18} className="text-success" />
             ) : (
               <ArrowDown size={18} className="text-danger" />
             )}
           </div>
-          <p className="text-sm text-danger/80 mt-0.5">
-            {opportunity.label} — {opportunity.expectedDirection === "up" ? "Hausse" : "Baisse"} imminente ({opportunity.spikeProbability}%)
+          <p className="text-sm mt-0.5">
+            {opportunity.label} — {sr?.levelType === "support" ? "Support" : "Résistance"} à {sr?.levelPrice?.toFixed(2) ?? "—"} ({opportunity.spikeProbability}%)
           </p>
         </div>
         <div className="text-right">
-          <div className="text-lg font-bold font-mono text-danger">{opportunity.spikeProbability}%</div>
-          <div className="text-xs text-danger/70">Probabilité</div>
+          <div className="text-lg font-bold font-mono">{opportunity.spikeProbability}%</div>
+          <div className="text-xs">Probabilité</div>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-3 mt-3 text-xs text-danger/70">
-        <div>
-          <span className="block text-danger/50">Prix</span>
-          <span className="font-mono font-semibold text-danger">
-            ${opportunity.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </span>
+      {sr && (
+        <div className="grid grid-cols-4 gap-3 mt-3 text-xs">
+          <div>
+            <span className="block opacity-50">Niveau {sr.levelType === "support" ? "S" : "R"}</span>
+            <span className="font-mono font-semibold">${sr.levelPrice.toFixed(2)}</span>
+          </div>
+          <div>
+            <span className="block opacity-50">Force</span>
+            <span className="font-mono font-semibold">x{sr.levelStrength}</span>
+          </div>
+          <div>
+            <span className="block opacity-50">Distance</span>
+            <span className="font-mono font-semibold">{sr.distancePercent}%</span>
+          </div>
+          <div>
+            <span className="block opacity-50">Confluence TF</span>
+            <span className="font-mono font-semibold">{sr.tfConfluence}/3</span>
+          </div>
         </div>
-        <div>
-          <span className="block text-danger/50">Ampleur estimée</span>
-          <span className="font-mono font-semibold text-danger">{opportunity.estimatedMagnitude}</span>
-        </div>
-        <div>
-          <span className="block text-danger/50">Dernier spike</span>
-          <span className="font-mono font-semibold text-danger">
-            {opportunity.timeSinceLastSpike > 60
-              ? `${Math.round(opportunity.timeSinceLastSpike / 60)}m`
-              : `${opportunity.timeSinceLastSpike}s`}
-          </span>
-        </div>
-      </div>
+      )}
       <div className="mt-2 flex flex-wrap gap-1.5">
         {opportunity.sRlevels.slice(0, 4).map((level, i) => (
           <span key={i}
@@ -297,6 +312,7 @@ export default function MarketScanner() {
                   <thead>
                     <tr className="border-b border-border text-xs text-text-muted uppercase">
                       <th className="text-left px-4 py-3 font-semibold">Marché</th>
+                      <th className="text-left px-4 py-3 font-semibold">S/R</th>
                       <th className="text-right px-4 py-3 font-semibold">Probabilité</th>
                       <th className="text-right px-4 py-3 font-semibold">Fiabilité</th>
                       <th className="text-right px-4 py-3 font-semibold">Direction</th>
@@ -327,6 +343,35 @@ export default function MarketScanner() {
                               </span>
                             )}
                           </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const sa = opp.srAlert;
+                            if (!sa || !sa.hasSRLevel) return <span className="text-xs text-text-muted">—</span>;
+                            const typeColor = sa.srAlertType === "touched" ? "text-danger"
+                              : sa.srAlertType === "approaching" ? "text-primary"
+                              : "text-text-muted";
+                            const typeLabel = sa.srAlertType === "touched" ? "Touché"
+                              : sa.srAlertType === "approaching" ? "Approche"
+                              : "—";
+                            const levelLabel = sa.levelType === "support" ? "S" : "R";
+                            return (
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[10px] font-bold ${typeColor}`}>
+                                  {levelLabel}{sa.levelStrength}
+                                </span>
+                                {sa.srAlertType !== "none" && (
+                                  <span className={`text-[9px] px-1 py-0.5 rounded font-medium ${
+                                    sa.srAlertType === "touched"
+                                      ? "bg-danger/15 text-danger"
+                                      : "bg-primary/15 text-primary"
+                                  }`}>
+                                    {typeLabel}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -392,12 +437,20 @@ export default function MarketScanner() {
                   </div>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                     <div className="rounded-lg bg-background border border-border p-3">
-                      <p className="text-[10px] text-text-muted uppercase font-semibold">Up Score (Support)</p>
-                      <p className="text-lg font-bold font-mono text-success mt-1">{opp.upScore}%</p>
+                      <p className="text-[10px] text-text-muted uppercase font-semibold">Niveau S/R</p>
+                      <p className="text-lg font-bold font-mono mt-1">
+                        {opp.srAlert ? (
+                          <span>{opp.srAlert.levelType === "support" ? "S" : "R"}${opp.srAlert.levelPrice.toFixed(2)} <span className="text-xs text-text-muted">x{opp.srAlert.levelStrength}</span></span>
+                        ) : "—"}
+                      </p>
                     </div>
                     <div className="rounded-lg bg-background border border-border p-3">
-                      <p className="text-[10px] text-text-muted uppercase font-semibold">Down Score (Résistance)</p>
-                      <p className="text-lg font-bold font-mono text-danger mt-1">{opp.downScore}%</p>
+                      <p className="text-[10px] text-text-muted uppercase font-semibold">Statut S/R</p>
+                      <p className="text-lg font-bold font-mono mt-1">
+                        {opp.srAlert?.srAlertType === "touched" ? <span className="text-danger">Touché</span>
+                          : opp.srAlert?.srAlertType === "approaching" ? <span className="text-primary">Approche ⚡</span>
+                          : <span className="text-text-muted">—</span>}
+                      </p>
                     </div>
                     <div className="rounded-lg bg-background border border-border p-3">
                       <p className="text-[10px] text-text-muted uppercase font-semibold">Fiabilité réelle</p>
@@ -410,8 +463,8 @@ export default function MarketScanner() {
                       </p>
                     </div>
                     <div className="rounded-lg bg-background border border-border p-3">
-                      <p className="text-[10px] text-text-muted uppercase font-semibold">Distance du niveau</p>
-                      <p className="text-lg font-bold font-mono mt-1">{opp.distancePercent}%</p>
+                      <p className="text-[10px] text-text-muted uppercase font-semibold">Confluence TF</p>
+                      <p className="text-lg font-bold font-mono mt-1">{opp.srAlert?.tfConfluence ?? "—"}/3</p>
                     </div>
                   </div>
                   {opp.sRlevels.length > 0 && (

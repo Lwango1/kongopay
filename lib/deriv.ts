@@ -623,6 +623,22 @@ function scoreSignal(
   return { score: Math.min(score, 1), referenceLevel: refLevel, referenceStrength: refStrength, distancePct: distance / (refLevel || currentPrice) * 100, consecutive };
 }
 
+export interface SRAlert {
+  hasSRLevel: boolean;
+  levelPrice: number;
+  levelStrength: number;
+  levelType: "support" | "resistance";
+  distancePercent: number;
+  isApproaching: boolean;
+  approachVelocity: number;
+  approachAcceleration: number;
+  levelTouched: boolean;
+  touchTimestamp: number | null;
+  srAlertType: "none" | "approaching" | "touched" | "breaking";
+  srConfidence: number;
+  tfConfluence: number;
+}
+
 export function predictSpike(type: IndexType, num: number) {
   const key = getKey(type, num);
   const st = stateMap.get(key);
@@ -638,7 +654,6 @@ export function predictSpike(type: IndexType, num: number) {
   const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
   const orderBlocks = findOrderBlocks(history);
 
-  // --- Scoring Support / Résistance ---
   const isBoom = type === "BOOM";
   const isUp = isBoom;
   const refLevel = isBoom
@@ -647,24 +662,110 @@ export function predictSpike(type: IndexType, num: number) {
   const refStrength = isBoom
     ? (nearestSupport?.strength ?? 1)
     : (nearestResistance?.strength ?? 1);
+  const refType = isBoom ? "support" as const : "resistance" as const;
 
-  // Détection des déséquilibres order blocks
   const bestOB = orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01
     ? orderBlocks[0]
     : null;
 
-  // Score de base : proximité du niveau S/R + force du niveau + market structure
+  // === S/R ALERT SYSTEM ===
   const distanceToRef = Math.abs(currentPrice - refLevel) / (refLevel || currentPrice);
-  const proximity = Math.max(0, 1 - distanceToRef / 0.02); // 0-1, 1 = très proche
-  const levelStrengthScore = Math.min(refStrength / 8, 1) * 0.3;
+  const proximity = Math.max(0, 1 - distanceToRef / 0.02);
 
-  // Consecutive moves (exhaustion)
+  // Approach detection
+  const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
+  let isApproaching = false;
+  let approachVelocity = 0;
+  let approachAcceleration = 0;
+  if (approachLevel) {
+    const recent = history.slice(-15);
+    let towardCount = 0;
+    for (let i = 1; i < recent.length; i++) {
+      const priceRise = recent[i] > recent[i - 1];
+      const levelAbove = approachLevel > currentPrice;
+      if (levelAbove ? priceRise : !priceRise) towardCount++;
+    }
+    const slice = history.slice(-8);
+    const slope = (slice[slice.length - 1] - slice[0]) / slice.length;
+    const avgPrice2 = (currentPrice + approachLevel) / 2 || 1;
+    const volScale2 = vol > 0 ? Math.max((vol / avgPrice2) / 0.0005, 0.5) : 1;
+    approachVelocity = Math.abs(slope) / avgPrice2 / volScale2;
+
+    const slice2 = history.slice(-15);
+    const slope2 = (slice2[slice2.length - 1] - slice2[0]) / slice2.length;
+    approachAcceleration = Math.abs(slope - slope2) / avgPrice2 / volScale2;
+
+    isApproaching = towardCount >= 4 || (towardCount >= 2 && approachVelocity > 0.2);
+  }
+
+  // Level touched detection
+  const touchThreshold = 0.0008;
+  const touchWindow = Math.min(history.length, 40);
+  let levelTouched = false;
+  let touchTimestamp: number | null = null;
+  if (isBoom && nearestSupport) {
+    for (let i = history.length - touchWindow; i < history.length; i++) {
+      if (Math.abs(history[i] - nearestSupport.price) / nearestSupport.price < touchThreshold) {
+        levelTouched = true;
+        touchTimestamp = st.timestamps[i] ?? Date.now();
+        break;
+      }
+    }
+  } else if (!isBoom && nearestResistance) {
+    for (let i = history.length - touchWindow; i < history.length; i++) {
+      if (Math.abs(history[i] - nearestResistance.price) / nearestResistance.price < touchThreshold) {
+        levelTouched = true;
+        touchTimestamp = st.timestamps[i] ?? Date.now();
+        break;
+      }
+    }
+  }
+
+  // S/R Alert Type
+  let srAlertType: "none" | "approaching" | "touched" | "breaking" = "none";
+  if (levelTouched) {
+    srAlertType = "touched";
+  } else if (isApproaching && proximity > 0.3) {
+    srAlertType = "approaching";
+  } else if (isApproaching) {
+    srAlertType = "approaching";
+  }
+
+  // Multi-timeframe confluence for S/R level
+  let tfConfluence = 0;
+  const prices30m = candlePrices(candleMap30m, key);
+  const prices60m = candlePrices(candleMap60m, key);
+  const prices120m = candlePrices(candleMap120m, key);
+  if (prices30m.length > 10) {
+    const { nearestSupport: s30, nearestResistance: r30 } = findSupportResistance(prices30m, currentPrice);
+    const ref30m = isBoom ? s30?.price : r30?.price;
+    if (ref30m && Math.abs(ref30m - refLevel) / refLevel < 0.005) tfConfluence++;
+  }
+  if (prices60m.length > 10) {
+    const { nearestSupport: s60, nearestResistance: r60 } = findSupportResistance(prices60m, currentPrice);
+    const ref60m = isBoom ? s60?.price : r60?.price;
+    if (ref60m && Math.abs(ref60m - refLevel) / refLevel < 0.005) tfConfluence++;
+  }
+  if (prices120m.length > 10) {
+    const { nearestSupport: s120, nearestResistance: r120 } = findSupportResistance(prices120m, currentPrice);
+    const ref120m = isBoom ? s120?.price : r120?.price;
+    if (ref120m && Math.abs(ref120m - refLevel) / refLevel < 0.005) tfConfluence++;
+  }
+
+  // S/R confidence score
+  const approachScore = isApproaching ? Math.min(approachVelocity * 2, 0.3) : 0;
+  const proximityScore = proximity * 0.4;
+  const strengthScore = Math.min(refStrength / 10, 1) * 0.3;
+  const tfScore = tfConfluence * 0.1;
+  const srConfidence = Math.min(proximityScore + strengthScore + approachScore + tfScore, 1);
+
+  // === PROBABILITY SCORE ===
+  const levelStrengthScore = Math.min(refStrength / 8, 1) * 0.3;
   const recentMoves = history.slice(-15).map((p, i, arr) => i > 0 ? p - arr[i - 1] : 0).slice(1);
   const consecFiltered = recentMoves.slice(-5).filter(m => isUp ? m < 0 : m > 0);
   const consecutive = consecFiltered.length;
   const exhaustion = consecutive >= 4 ? 0.2 : 0;
 
-  // Market structure alignment
   let marketScore = 0;
   if (isUp && market.trend === "uptrend") marketScore = 0.12;
   else if (!isUp && market.trend === "downtrend") marketScore = 0.12;
@@ -672,25 +773,19 @@ export function predictSpike(type: IndexType, num: number) {
   if (isUp && market.liquiditySwept && market.lastBreakout === "bullish") marketScore += 0.08;
   else if (!isUp && market.liquiditySwept && market.lastBreakout === "bearish") marketScore += 0.08;
 
-  // RSI divergence simple
   let rsiScore = 0;
   if (isUp && rsiVal < 30) rsiScore = 0.12;
   else if (!isUp && rsiVal > 70) rsiScore = 0.12;
   else if (isUp && rsiVal < 40) rsiScore = 0.06;
   else if (!isUp && rsiVal > 60) rsiScore = 0.06;
 
-  // Order block bonus
   const obBonus = bestOB ? Math.min(bestOB.strength / 5, 1) * 0.08 : 0;
-
-  const bestScore = Math.min(proximity * 0.25 + marketScore + rsiScore + levelStrengthScore + exhaustion + obBonus, 1);
+  const bestScore = Math.min(srConfidence * 0.35 + marketScore + rsiScore + levelStrengthScore * 0.3 + exhaustion + obBonus, 1);
 
   const msSinceLastSpike = Date.now() - st.lastSpikeTime;
   let probability = Math.min(Math.max(bestScore * 100, 20), 97);
 
-  // Confirmation multi-timeframe (S/R uniquement)
-  const prices30m = candlePrices(candleMap30m, key);
-  const prices60m = candlePrices(candleMap60m, key);
-  const prices120m = candlePrices(candleMap120m, key);
+  // Multi-timeframe score alignment
   if (prices30m.length > 10) {
     const market30m = analyzeMarketStructure(prices30m);
     const { nearestSupport: s30, nearestResistance: r30 } = findSupportResistance(prices30m, currentPrice);
@@ -728,7 +823,6 @@ export function predictSpike(type: IndexType, num: number) {
     else probability -= 2;
   }
 
-  // Spike interval model
   const spikeProb = spikeProbability(st.spikeIntervalModel, msSinceLastSpike, 60000);
   if (st.spikeIntervalModel.ready && st.spikeIntervalModel.sampleSize >= 3) {
     const hazard = st.spikeIntervalModel.shape / Math.max(st.spikeIntervalModel.scale, 1);
@@ -742,7 +836,6 @@ export function predictSpike(type: IndexType, num: number) {
   }
   probability = Math.min(Math.max(probability, 0), 97);
 
-  // Features avancées (GARCH, Wavelet, Fourier) — bonus complémentaire
   let advancedBonus = 0;
   try {
     const adv = computeAdvancedFeatures(history);
@@ -753,11 +846,9 @@ export function predictSpike(type: IndexType, num: number) {
   } catch (e) {}
   probability = Math.min(probability + advancedBonus * 100, 97);
 
-  // Volatilité
   const volScale = vol > 0 ? Math.max((vol / (currentPrice || 1)) / 0.0005, 0.5) : 1;
   const atrPercent = vol / (currentPrice || 1);
 
-  // Ajustement SL/TP
   let slMultiplier = 0.6;
   let tpMultiplier = 1.8;
   if (atrPercent > 0.002) { slMultiplier *= 1.2; tpMultiplier *= 1.3; }
@@ -770,55 +861,12 @@ export function predictSpike(type: IndexType, num: number) {
   const magnitudePct = (0.008 + bestScore * 0.04) * (recentRange / 0.005) * volScale;
   const magnitudeStr = `${(magnitudePct * 100).toFixed(1)}%`;
 
-  // Détection toucher de niveau
-  let levelTouched = false;
-  if (touchModeEnabled) {
-    const touchThreshold = 0.0008;
-    const touchWindow = Math.min(history.length, 40);
-    if (isBoom && nearestSupport) {
-      for (let i = history.length - touchWindow; i < history.length; i++) {
-        if (Math.abs(history[i] - nearestSupport.price) / nearestSupport.price < touchThreshold) {
-          levelTouched = true; break;
-        }
-      }
-    } else if (!isBoom && nearestResistance) {
-      for (let i = history.length - touchWindow; i < history.length; i++) {
-        if (Math.abs(history[i] - nearestResistance.price) / nearestResistance.price < touchThreshold) {
-          levelTouched = true; break;
-        }
-      }
-    }
-  } else {
-    levelTouched = true;
-  }
-
-  // Approche prédictive : le prix se dirige-t-il vers le niveau ?
-  let isApproaching = false;
-  let approachVelocity = 0;
-  const approachLevel = isBoom ? nearestSupport?.price : nearestResistance?.price;
-  if (approachLevel) {
-    const recent = history.slice(-10);
-    let towardCount = 0;
-    for (let i = 1; i < recent.length; i++) {
-      const priceRise = recent[i] > recent[i - 1];
-      const levelAbove = approachLevel > currentPrice;
-      if (levelAbove ? priceRise : !priceRise) towardCount++;
-    }
-    const slice = history.slice(-8);
-    const slope = (slice[slice.length - 1] - slice[0]) / slice.length;
-    const avgPrice2 = (currentPrice + approachLevel) / 2 || 1;
-    const volScale2 = vol > 0 ? Math.max((vol / avgPrice2) / 0.0005, 0.5) : 1;
-    approachVelocity = Math.abs(slope) / avgPrice2 / volScale2;
-    isApproaching = towardCount >= 3 || approachVelocity > 0.3;
-  }
-
   const pricePos = nearestSupport && nearestResistance
     ? Math.round(((currentPrice - nearestSupport.price) / (nearestResistance.price - nearestSupport.price)) * 100)
     : 50;
 
   const expDir = isBoom ? "up" : "down";
 
-  // Seuils adaptatifs
   const perfKey = `${type}_${num}`;
   const perfStats = signalPerformance.get(perfKey) || { total: 0, wins: 0, recentAccuracy: 0.55 };
   const adaptiveBase = 0.55 + (perfStats.recentAccuracy - 0.5) * 0.3;
@@ -832,7 +880,6 @@ export function predictSpike(type: IndexType, num: number) {
     signal = isBoom ? "BUY" : "SELL";
   }
 
-  // Entry, SL, TP basés sur les niveaux S/R
   const predictive = isApproaching && !levelTouched;
   const slDistance = Math.max(vol * slMultiplier, currentPrice * 0.002);
   const tpDistance = Math.max(vol * tpMultiplier, slDistance * 2);
@@ -863,7 +910,6 @@ export function predictSpike(type: IndexType, num: number) {
     ? Math.max(entryLevel + tpDistance, currentPrice + tpDistance)
     : Math.min(entryLevel - tpDistance, currentPrice - tpDistance);
 
-  // Confirmation
   let isConfirmed = false;
   let confirmationPrice: number | null = null;
   if (signal !== "NEUTRAL") {
@@ -893,6 +939,24 @@ export function predictSpike(type: IndexType, num: number) {
     ? { level: bestOB.price, strength: bestOB.strength }
     : { level: refLevel, strength: refStrength };
 
+  // === S/R ALERT ===
+  const hasSRLevel = nearestSupport !== null && nearestResistance !== null;
+  const srAlert: SRAlert = {
+    hasSRLevel,
+    levelPrice: Math.round(refLevel * 100) / 100,
+    levelStrength: refStrength,
+    levelType: refType,
+    distancePercent: Math.round(distanceToRef * 10000) / 100,
+    isApproaching,
+    approachVelocity: Math.round(approachVelocity * 100) / 100,
+    approachAcceleration: Math.round(approachAcceleration * 100) / 100,
+    levelTouched,
+    touchTimestamp,
+    srAlertType,
+    srConfidence: Math.round(srConfidence * 100),
+    tfConfluence,
+  };
+
   return {
     type, number: num, currentPrice,
     spikeProbability: Math.round(Math.min(probability, 97)),
@@ -919,6 +983,7 @@ export function predictSpike(type: IndexType, num: number) {
     stopLoss: Math.round(stopLoss * 100) / 100,
     takeProfit: Math.round(takeProfit * 100) / 100,
     isConfirmed, confirmationPrice: confirmationPrice ? Math.round(confirmationPrice * 100) / 100 : null,
+    srAlert,
   };
 }
 
@@ -991,6 +1056,7 @@ export interface MarketOpportunity {
   volScale?: number;
   connected: boolean;
   timestamp: number;
+  srAlert?: SRAlert;
   indicators?: any;
 }
 
@@ -1045,6 +1111,7 @@ export function scanAllMarkets(): MarketScanResult {
       volScale: prediction.volScale,
       connected: prediction.connected,
       timestamp: prediction.timestamp,
+      srAlert: prediction.srAlert,
     });
   }
 
