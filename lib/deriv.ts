@@ -237,6 +237,17 @@ function processMessage(data: any) {
     st.price = prices[prices.length - 1];
     st.connected = true;
 
+    // Build candles from history so multi-TF analysis works immediately
+    candleMap15m.set(key, []);
+    candleMap30m.set(key, []);
+    candleMap60m.set(key, []);
+    candleMap120m.set(key, []);
+    if (times.length === prices.length) {
+      for (let i = 0; i < prices.length; i++) {
+        updateCandleMulti(key, prices[i], times[i] * 1000);
+      }
+    }
+
     if (prices.length > 1440) {
       priceAt24hAgo.set(key, prices[prices.length - 1440]);
     } else if (prices.length > 0) {
@@ -553,15 +564,52 @@ function findSupportResistance(prices: number[], currentPrice: number): {
     }
   }
 
-  const supports: SRLevel[] = clusters
+  let supports: SRLevel[] = clusters
     .filter(c => c.price < currentPrice)
     .map(c => ({ price: c.price, strength: c.strength, type: "support" as const }))
     .sort((a, b) => b.price - a.price);
 
-  const resistances: SRLevel[] = clusters
+  let resistances: SRLevel[] = clusters
     .filter(c => c.price > currentPrice)
     .map(c => ({ price: c.price, strength: c.strength, type: "resistance" as const }))
     .sort((a, b) => a.price - b.price);
+
+  // Fallback: if no support/resistance found, use percentiles
+  if (supports.length === 0 && prices.length >= 10) {
+    const sorted = [...prices].sort((a, b) => a - b);
+    const len = sorted.length;
+    const p10 = sorted[Math.floor(len * 0.1)];
+    const p25 = sorted[Math.floor(len * 0.25)];
+    const p50 = sorted[Math.floor(len * 0.5)];
+    if (p10 < currentPrice) {
+      supports.push({ price: p10, strength: 1, type: "support" });
+    }
+    if (p25 < currentPrice && p25 !== p10) {
+      supports.push({ price: p25, strength: 1, type: "support" });
+    }
+    if (p50 < currentPrice && p50 !== p25) {
+      supports.push({ price: p50, strength: 1, type: "support" });
+    }
+    supports.sort((a, b) => b.price - a.price);
+  }
+
+  if (resistances.length === 0 && prices.length >= 10) {
+    const sorted = [...prices].sort((a, b) => a - b);
+    const len = sorted.length;
+    const p75 = sorted[Math.floor(len * 0.75)];
+    const p90 = sorted[Math.floor(len * 0.9)];
+    const p95 = sorted[Math.floor(len * 0.95)];
+    if (p75 > currentPrice) {
+      resistances.push({ price: p75, strength: 1, type: "resistance" });
+    }
+    if (p90 > currentPrice && p90 !== p75) {
+      resistances.push({ price: p90, strength: 1, type: "resistance" });
+    }
+    if (p95 > currentPrice && p95 !== p90) {
+      resistances.push({ price: p95, strength: 1, type: "resistance" });
+    }
+    resistances.sort((a, b) => a.price - b.price);
+  }
 
   const scoreLevel = (level: SRLevel): number => {
     const distPct = Math.abs(level.price - currentPrice) / currentPrice;
@@ -849,10 +897,39 @@ export function predictSpike(type: IndexType, num: number) {
   const volScale = vol > 0 ? Math.max((vol / (currentPrice || 1)) / 0.0005, 0.5) : 1;
   const atrPercent = vol / (currentPrice || 1);
 
+  // === SQUEEZE DETECTION (prix au plus bas/haut avant le spike) ===
+  // Pattern: le prix touche le point extrême (bas pour Boom, haut pour Crash)
+  // et reste là pendant des dizaines de ticks avant le spike
+  const squeezeLookback = Math.min(history.length, 300);
+  const squeezeRecent = history.slice(-squeezeLookback);
+  const squeezeHigh = Math.max(...squeezeRecent);
+  const squeezeLow = Math.min(...squeezeRecent);
+  const squeezeRangePct = squeezeHigh > 0 ? (squeezeHigh - squeezeLow) / squeezeHigh : 0;
+  // L'extrême recherché : le point le plus bas pour Boom, le plus haut pour Crash
+  const targetExtreme = isBoom ? squeezeLow : squeezeHigh;
+  const threshold = currentPrice * 0.001; // 0.1% de l'extrême
+  let squeezeDuration = 0;
+  for (let i = squeezeRecent.length - 1; i >= 0; i--) {
+    const dist = Math.abs(squeezeRecent[i] - targetExtreme);
+    if (dist <= threshold) {
+      squeezeDuration++;
+    } else if (squeezeDuration < 10) {
+      squeezeDuration = 0; // Réinitialiser si pas assez de continuité
+    } else break;
+  }
+  // Score basé sur la durée à l'extrême et l'étroitesse du range global
+  const rangeFactor = squeezeRangePct < 0.005 ? 1 : squeezeRangePct < 0.01 ? 0.6 : 0.2;
+  const squeezeScore = Math.min(
+    rangeFactor * Math.min(squeezeDuration / 60, 1),
+  1);
+  const isSqueezing = squeezeDuration >= 30 && rangeFactor >= 0.6;
+
   let slMultiplier = 0.6;
   let tpMultiplier = 1.8;
   if (atrPercent > 0.002) { slMultiplier *= 1.2; tpMultiplier *= 1.3; }
   else if (atrPercent < 0.0005) { slMultiplier *= 0.8; tpMultiplier *= 0.7; }
+  // Longer SL/TP during squeeze (spike tends to be stronger after long consolidation)
+  if (isSqueezing) { slMultiplier *= 1.3; tpMultiplier *= 1.5; }
 
   const lookback = Math.min(history.length, 100);
   const recentHigh = Math.max(...history.slice(-lookback));
@@ -867,17 +944,38 @@ export function predictSpike(type: IndexType, num: number) {
 
   const expDir = isBoom ? "up" : "down";
 
+  // Squeeze probability boost
+  if (isSqueezing) {
+    probability = Math.min(probability + squeezeScore * 25, 97);
+  }
+
+  // === HIGH-QUALITY SIGNAL FILTERS ===
   const perfKey = `${type}_${num}`;
   const perfStats = signalPerformance.get(perfKey) || { total: 0, wins: 0, recentAccuracy: 0.55 };
   const adaptiveBase = 0.55 + (perfStats.recentAccuracy - 0.5) * 0.3;
   const strBuyThreshold = Math.min(75 + (1 - adaptiveBase) * 20, 88);
   const buyThreshold = Math.min(68 + (1 - adaptiveBase) * 20, 82);
 
+  // Strict filters: only signal when level is touched + TF confluence + min volatility
+  const signalCooldownMs = 6 * 60 * 60 * 1000; // 6h between signals per market (~max 1-2 signaux par jour)
+  const timeSincePrevSignal = Date.now() - st.prevSignalTime;
+  const minVolScale = 0.8; // skip extremely calm markets
+  const minTfConfluence = Math.min(tfConfluence, 3);
+
+  const passesQualityFilters =
+    timeSincePrevSignal >= signalCooldownMs &&
+    history.length >= 100 &&
+    (
+      // Normal path : niveau touché + confluence TF + volatilité suffisante
+      (levelTouched && tfConfluence >= 2 && volScale >= minVolScale) ||
+      // Squeeze path : longue consolidation + squeeze score élevé (volatilité va exploser)
+      (isSqueezing && squeezeScore >= 0.5 && probability >= buyThreshold)
+    );
+
   let signal: Signal = "NEUTRAL";
-  if (probability >= strBuyThreshold) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
-  else if (probability >= buyThreshold) signal = isBoom ? "BUY" : "SELL";
-  else if (probability >= buyThreshold - 8 && levelTouched && bestScore > 0.6) {
-    signal = isBoom ? "BUY" : "SELL";
+  if (passesQualityFilters) {
+    if (probability >= strBuyThreshold) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
+    else if (probability >= buyThreshold) signal = isBoom ? "BUY" : "SELL";
   }
 
   const predictive = isApproaching && !levelTouched;
@@ -940,7 +1038,7 @@ export function predictSpike(type: IndexType, num: number) {
     : { level: refLevel, strength: refStrength };
 
   // === S/R ALERT ===
-  const hasSRLevel = nearestSupport !== null && nearestResistance !== null;
+  const hasSRLevel = nearestSupport !== null || nearestResistance !== null;
   const srAlert: SRAlert = {
     hasSRLevel,
     levelPrice: Math.round(refLevel * 100) / 100,
@@ -963,7 +1061,9 @@ export function predictSpike(type: IndexType, num: number) {
     expectedDirection: expDir,
     estimatedMagnitude: magnitudeStr,
     timeSinceLastSpike: Math.round(msSinceLastSpike / 1000),
-    isSpikeImminent: probability >= (volScale > 1.5 ? 72 : 75) && (levelTouched || isApproaching),
+    isSpikeImminent: passesQualityFilters && probability >= 80,
+    isSqueezing, squeezeScore: Math.round(squeezeScore * 100) / 100,
+    squeezeDuration,
     levelTouched, isApproaching,
     approachVelocity: Math.round(approachVelocity * 100) / 100,
     volScale: Math.round(volScale * 100) / 100,
