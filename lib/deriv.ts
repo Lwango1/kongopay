@@ -964,6 +964,43 @@ export function predictSpike(type: IndexType, num: number) {
 
   const expDir = isBoom ? "up" : "down";
 
+  // === ANALYSE QUOTIDIENNE (tendance et dernier retournement) ===
+  const dailyPrices = candlePrices(candleMap120m, key);
+  let dailyTrend: "hausse" | "baisse" | "neutre" = "neutre";
+  let lastReversalPrice = 0;
+  let lastReversalType: "support" | "resistance" | null = null;
+  let dailyTrendScore = 0;
+  if (dailyPrices.length >= 8) {
+    // Tendance sur les 6 dernières bougies 2h (= 12h de trading)
+    const daySlice = dailyPrices.slice(-8);
+    const dayStart = daySlice[0];
+    const dayEnd = daySlice[daySlice.length - 1];
+    const dayChange = dayStart > 0 ? (dayEnd - dayStart) / dayStart : 0;
+    if (dayChange > 0.005) dailyTrend = "hausse";
+    else if (dayChange < -0.005) dailyTrend = "baisse";
+    // Dernier pivot sur le 2h (= dernier retournement significatif)
+    const dayPivots = findPivots(daySlice, 3);
+    const dayHighs = dayPivots.filter(p => p.isHigh).sort((a, b) => b.price - a.price);
+    const dayLows = dayPivots.filter(p => !p.isHigh).sort((a, b) => a.price - b.price);
+    // Le dernier retournement : le pivot le plus récent (le plus proche de la fin)
+    const recentPivot = dayPivots.length > 0
+      ? dayPivots.reduce((a, b) => Math.abs(a.price - dayEnd) < Math.abs(b.price - dayEnd) ? a : b)
+      : null;
+    if (recentPivot) {
+      lastReversalPrice = recentPivot.price;
+      lastReversalType = recentPivot.isHigh ? "resistance" : "support";
+    }
+    // Score : le spike dans la direction de la tendance quotidienne est plus fiable
+    if ((isBoom && dailyTrend === "hausse") || (!isBoom && dailyTrend === "baisse")) {
+      dailyTrendScore = 8; // Spike dans le sens de la tendance du jour
+    } else if (dailyTrend === "neutre") {
+      dailyTrendScore = 3;
+    } else {
+      dailyTrendScore = -5; // Spike à contre-tendance = moins fiable
+    }
+    probability = Math.min(probability + dailyTrendScore, 97);
+  }
+
   // Squeeze probability boost
   if (isSqueezing) {
     probability = Math.min(probability + squeezeScore * 25, 97);
@@ -982,20 +1019,25 @@ export function predictSpike(type: IndexType, num: number) {
   const minVolScale = 0.8; // skip extremely calm markets
   const minTfConfluence = Math.min(tfConfluence, 3);
 
+  // Un signal à contre-tendance quotidienne nécessite une probabilité bien plus élevée
+  const effectiveBuyThreshold = dailyTrendScore < 0 ? buyThreshold + 10 : buyThreshold;
+  const effectiveStrBuyThreshold = dailyTrendScore < 0 ? strBuyThreshold + 8 : strBuyThreshold;
+
   const passesQualityFilters =
     timeSincePrevSignal >= signalCooldownMs &&
     history.length >= 100 &&
+    dailyTrendScore >= 0 && // Jamais de signal à contre-tendance du jour
     (
       // Normal path : niveau touché + confluence TF + volatilité suffisante
       (levelTouched && tfConfluence >= 2 && volScale >= minVolScale) ||
       // Squeeze path : longue consolidation + squeeze score élevé (volatilité va exploser)
-      (isSqueezing && squeezeScore >= 0.5 && probability >= buyThreshold)
+      (isSqueezing && squeezeScore >= 0.5 && probability >= effectiveBuyThreshold)
     );
 
   let signal: Signal = "NEUTRAL";
   if (passesQualityFilters) {
-    if (probability >= strBuyThreshold) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
-    else if (probability >= buyThreshold) signal = isBoom ? "BUY" : "SELL";
+    if (probability >= effectiveStrBuyThreshold) signal = isBoom ? "STRONG_BUY" : "STRONG_SELL";
+    else if (probability >= effectiveBuyThreshold) signal = isBoom ? "BUY" : "SELL";
   }
 
   const predictive = isApproaching && !levelTouched;
@@ -1084,6 +1126,7 @@ export function predictSpike(type: IndexType, num: number) {
     isSpikeImminent: passesQualityFilters && probability >= 80,
     isSqueezing, squeezeScore: Math.round(squeezeScore * 100) / 100,
     squeezeDuration,
+    dailyTrend, dailyTrendScore, lastReversalPrice: Math.round(lastReversalPrice * 100) / 100, lastReversalType,
     levelTouched, isApproaching,
     approachVelocity: Math.round(approachVelocity * 100) / 100,
     volScale: Math.round(volScale * 100) / 100,
