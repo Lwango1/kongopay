@@ -137,9 +137,12 @@ const isServer = typeof window === "undefined";
 
 function createWebSocket(url: string): any {
   if (isServer) {
-    // Use the 'ws' library on Node.js (native WebSocket has issues on Windows)
-    const { WebSocket: WsWebSocket } = require("ws");
-    return new WsWebSocket(url);
+    try {
+      const { WebSocket: WsWebSocket } = require("ws");
+      return new WsWebSocket(url);
+    } catch {
+      return new (require("ws"))(url);
+    }
   }
   return new WebSocket(url);
 }
