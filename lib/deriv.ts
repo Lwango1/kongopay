@@ -248,6 +248,33 @@ function processMessage(data: any) {
       }
     }
 
+    // Detect spikes in historical data for real lastSpikeTime and spikeIntervals
+    let lastKnownSpikeTime = st.lastSpikeTime;
+    let lastKnownPrice = prices[0];
+    for (let i = 1; i < prices.length; i++) {
+      const change = Math.abs(prices[i] - lastKnownPrice) / lastKnownPrice;
+      if (change > 0.015) {
+        const spikeTs = (times[i] || 0) * 1000;
+        if (lastKnownSpikeTime > 0 && spikeTs > lastKnownSpikeTime) {
+          const interval = spikeTs - lastKnownSpikeTime;
+          if (interval > 1000) {
+            st.spikeIntervals.push(interval);
+            if (st.spikeIntervals.length > 50) st.spikeIntervals.shift();
+          }
+        }
+        lastKnownSpikeTime = spikeTs;
+        st.lastSpikeDirection = prices[i] > lastKnownPrice ? "up" : "down";
+        lastKnownPrice = prices[i];
+      }
+    }
+    if (lastKnownSpikeTime > 0) {
+      st.lastSpikeTime = lastKnownSpikeTime;
+    }
+    // Fit Weibull model from historical spike intervals
+    if (st.spikeIntervals.length >= 3) {
+      st.spikeIntervalModel = fitSpikeIntervals(st.spikeIntervals);
+    }
+
     if (prices.length > 1440) {
       priceAt24hAgo.set(key, prices[prices.length - 1440]);
     } else if (prices.length > 0) {
@@ -542,7 +569,8 @@ function findOrderBlocks(prices: number[]): OrderBlock[] {
   return blocks.sort((a, b) => b.strength - a.strength).slice(0, 6);
 }
 
-function findSupportResistance(prices: number[], currentPrice: number): {
+/** Niveaux S/R basés sur les vrais pivots du marché (utilisés pour l'affichage) */
+function findRealSR(prices: number[], currentPrice: number): {
   nearestSupport: SRLevel | null;
   nearestResistance: SRLevel | null;
   allLevels: SRLevel[];
@@ -564,52 +592,15 @@ function findSupportResistance(prices: number[], currentPrice: number): {
     }
   }
 
-  let supports: SRLevel[] = clusters
+  const supports: SRLevel[] = clusters
     .filter(c => c.price < currentPrice)
     .map(c => ({ price: c.price, strength: c.strength, type: "support" as const }))
     .sort((a, b) => b.price - a.price);
 
-  let resistances: SRLevel[] = clusters
+  const resistances: SRLevel[] = clusters
     .filter(c => c.price > currentPrice)
     .map(c => ({ price: c.price, strength: c.strength, type: "resistance" as const }))
     .sort((a, b) => a.price - b.price);
-
-  // Fallback: if no support/resistance found, use percentiles
-  if (supports.length === 0 && prices.length >= 10) {
-    const sorted = [...prices].sort((a, b) => a - b);
-    const len = sorted.length;
-    const p10 = sorted[Math.floor(len * 0.1)];
-    const p25 = sorted[Math.floor(len * 0.25)];
-    const p50 = sorted[Math.floor(len * 0.5)];
-    if (p10 < currentPrice) {
-      supports.push({ price: p10, strength: 1, type: "support" });
-    }
-    if (p25 < currentPrice && p25 !== p10) {
-      supports.push({ price: p25, strength: 1, type: "support" });
-    }
-    if (p50 < currentPrice && p50 !== p25) {
-      supports.push({ price: p50, strength: 1, type: "support" });
-    }
-    supports.sort((a, b) => b.price - a.price);
-  }
-
-  if (resistances.length === 0 && prices.length >= 10) {
-    const sorted = [...prices].sort((a, b) => a - b);
-    const len = sorted.length;
-    const p75 = sorted[Math.floor(len * 0.75)];
-    const p90 = sorted[Math.floor(len * 0.9)];
-    const p95 = sorted[Math.floor(len * 0.95)];
-    if (p75 > currentPrice) {
-      resistances.push({ price: p75, strength: 1, type: "resistance" });
-    }
-    if (p90 > currentPrice && p90 !== p75) {
-      resistances.push({ price: p90, strength: 1, type: "resistance" });
-    }
-    if (p95 > currentPrice && p95 !== p90) {
-      resistances.push({ price: p95, strength: 1, type: "resistance" });
-    }
-    resistances.sort((a, b) => a.price - b.price);
-  }
 
   const scoreLevel = (level: SRLevel): number => {
     const distPct = Math.abs(level.price - currentPrice) / currentPrice;
@@ -629,6 +620,36 @@ function findSupportResistance(prices: number[], currentPrice: number): {
     nearestResistance: getStrongest(resistances),
     allLevels,
   };
+}
+
+/** Niveaux de référence pour le scoring (utilise les percentiles en fallback) */
+function getReferenceLevel(type: IndexType, history: number[], currentPrice: number): {
+  refLevel: number; refStrength: number;
+  refType: "support" | "resistance";
+  fallbackLevels: SRLevel[];
+} {
+  const isBoom = type === "BOOM";
+  const pivotSR = findRealSR(history, currentPrice);
+  const nearest = isBoom ? pivotSR.nearestSupport : pivotSR.nearestResistance;
+  if (nearest) {
+    return {
+      refLevel: nearest.price, refStrength: nearest.strength,
+      refType: nearest.type,
+      fallbackLevels: pivotSR.allLevels,
+    };
+  }
+  // Fallback percentiles pour le scoring uniquement
+  const sorted = [...history].sort((a, b) => a - b);
+  const len = sorted.length;
+  if (len < 5) {
+    const fallback = isBoom ? Math.min(...history.slice(-20)) : Math.max(...history.slice(-20));
+    const defType = isBoom ? "support" as const : "resistance" as const;
+    return { refLevel: fallback, refStrength: 1, refType: defType, fallbackLevels: [] };
+  }
+  const percentileIdx = isBoom ? Math.floor(len * 0.15) : Math.floor(len * 0.85);
+  const level = sorted[Math.max(0, Math.min(percentileIdx, len - 1))];
+  const defType = isBoom ? "support" as const : "resistance" as const;
+  return { refLevel: level, refStrength: 1, refType: defType, fallbackLevels: [] };
 }
 
 function scoreSignal(
@@ -699,18 +720,17 @@ export function predictSpike(type: IndexType, num: number) {
   const vol = calculateATR(history);
   const rsiVal = calculateRSI(history);
   const market = analyzeMarketStructure(history);
-  const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(history, currentPrice);
+  // S/R réels pour l'affichage (uniquement pivots)
+  const { nearestSupport, nearestResistance, allLevels } = findRealSR(history, currentPrice);
+  // Niveau de référence pour le scoring (percentile en fallback si pas de pivot)
+  const ref = getReferenceLevel(type, history, currentPrice);
+  const refLevel = ref.refLevel;
+  const refStrength = ref.refStrength;
+  const refType = ref.refType;
   const orderBlocks = findOrderBlocks(history);
 
   const isBoom = type === "BOOM";
   const isUp = isBoom;
-  const refLevel = isBoom
-    ? (nearestSupport?.price ?? Math.min(...history.slice(-20)))
-    : (nearestResistance?.price ?? Math.max(...history.slice(-20)));
-  const refStrength = isBoom
-    ? (nearestSupport?.strength ?? 1)
-    : (nearestResistance?.strength ?? 1);
-  const refType = isBoom ? "support" as const : "resistance" as const;
 
   const bestOB = orderBlocks.length > 0 && Math.abs(orderBlocks[0].price - currentPrice) / currentPrice < 0.01
     ? orderBlocks[0]
@@ -785,17 +805,17 @@ export function predictSpike(type: IndexType, num: number) {
   const prices60m = candlePrices(candleMap60m, key);
   const prices120m = candlePrices(candleMap120m, key);
   if (prices30m.length > 10) {
-    const { nearestSupport: s30, nearestResistance: r30 } = findSupportResistance(prices30m, currentPrice);
+    const { nearestSupport: s30, nearestResistance: r30 } = findRealSR(prices30m, currentPrice);
     const ref30m = isBoom ? s30?.price : r30?.price;
     if (ref30m && Math.abs(ref30m - refLevel) / refLevel < 0.005) tfConfluence++;
   }
   if (prices60m.length > 10) {
-    const { nearestSupport: s60, nearestResistance: r60 } = findSupportResistance(prices60m, currentPrice);
+    const { nearestSupport: s60, nearestResistance: r60 } = findRealSR(prices60m, currentPrice);
     const ref60m = isBoom ? s60?.price : r60?.price;
     if (ref60m && Math.abs(ref60m - refLevel) / refLevel < 0.005) tfConfluence++;
   }
   if (prices120m.length > 10) {
-    const { nearestSupport: s120, nearestResistance: r120 } = findSupportResistance(prices120m, currentPrice);
+    const { nearestSupport: s120, nearestResistance: r120 } = findRealSR(prices120m, currentPrice);
     const ref120m = isBoom ? s120?.price : r120?.price;
     if (ref120m && Math.abs(ref120m - refLevel) / refLevel < 0.005) tfConfluence++;
   }
@@ -836,9 +856,9 @@ export function predictSpike(type: IndexType, num: number) {
   // Multi-timeframe score alignment
   if (prices30m.length > 10) {
     const market30m = analyzeMarketStructure(prices30m);
-    const { nearestSupport: s30, nearestResistance: r30 } = findSupportResistance(prices30m, currentPrice);
-    const ref30m = isBoom ? (s30?.price ?? Math.min(...prices30m.slice(-20))) : (r30?.price ?? Math.max(...prices30m.slice(-20)));
-    const str30m = isBoom ? (s30?.strength ?? 1) : (r30?.strength ?? 1);
+    const ref30mInfo = getReferenceLevel(type, prices30m, currentPrice);
+    const ref30m = ref30mInfo.refLevel;
+    const str30m = ref30mInfo.refStrength;
     const d30 = Math.abs(currentPrice - ref30m) / (ref30m || currentPrice);
     const p30 = Math.max(0, 1 - d30 / 0.02);
     const ms30 = isUp && market30m.trend === "uptrend" ? 1 : (!isUp && market30m.trend === "downtrend" ? 1 : 0.5);
@@ -848,9 +868,9 @@ export function predictSpike(type: IndexType, num: number) {
   }
   if (prices60m.length > 10) {
     const market60m = analyzeMarketStructure(prices60m);
-    const { nearestSupport: s60, nearestResistance: r60 } = findSupportResistance(prices60m, currentPrice);
-    const ref60m = isBoom ? (s60?.price ?? Math.min(...prices60m.slice(-20))) : (r60?.price ?? Math.max(...prices60m.slice(-20)));
-    const str60m = isBoom ? (s60?.strength ?? 1) : (r60?.strength ?? 1);
+    const ref60mInfo = getReferenceLevel(type, prices60m, currentPrice);
+    const ref60m = ref60mInfo.refLevel;
+    const str60m = ref60mInfo.refStrength;
     const d60 = Math.abs(currentPrice - ref60m) / (ref60m || currentPrice);
     const p60 = Math.max(0, 1 - d60 / 0.02);
     const ms60 = isUp && market60m.trend === "uptrend" ? 1 : (!isUp && market60m.trend === "downtrend" ? 1 : 0.5);
@@ -860,9 +880,9 @@ export function predictSpike(type: IndexType, num: number) {
   }
   if (prices120m.length > 10) {
     const market120m = analyzeMarketStructure(prices120m);
-    const { nearestSupport: s120, nearestResistance: r120 } = findSupportResistance(prices120m, currentPrice);
-    const ref120m = isBoom ? (s120?.price ?? Math.min(...prices120m.slice(-20))) : (r120?.price ?? Math.max(...prices120m.slice(-20)));
-    const str120m = isBoom ? (s120?.strength ?? 1) : (r120?.strength ?? 1);
+    const ref120mInfo = getReferenceLevel(type, prices120m, currentPrice);
+    const ref120m = ref120mInfo.refLevel;
+    const str120m = ref120mInfo.refStrength;
     const d120 = Math.abs(currentPrice - ref120m) / (ref120m || currentPrice);
     const p120 = Math.max(0, 1 - d120 / 0.02);
     const ms120 = isUp && market120m.trend === "uptrend" ? 1 : (!isUp && market120m.trend === "downtrend" ? 1 : 0.5);
