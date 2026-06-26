@@ -7,7 +7,7 @@ import Footer from "@/components/Footer";
 
 export default function Home() {
   return (
-    <>
+    <div className="min-h-screen md:ml-64 transition-all duration-300">
       <Header />
       <main>
         <Hero />
@@ -16,6 +16,6 @@ export default function Home() {
         <DerivChart />
       </main>
       <Footer />
-    </>
+    </div>
   );
 }

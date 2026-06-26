@@ -27,74 +27,81 @@ export default function Header() {
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setOpen(!open)} className="md:hidden text-text p-2">
-              {open ? <X size={24} /> : <Menu size={24} />}
-            </button>
-            <a href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold text-sm">K</div>
-              <span className="font-bold text-lg">KongoPay</span>
-            </a>
-            <nav className="hidden md:flex items-center gap-6">
-              {NAV_ITEMS.map((item) => (
-                <a key={item.href} href={item.href} className="text-sm text-text-secondary hover:text-text transition-colors">{item.label}</a>
-              ))}
-            </nav>
-          </div>
-          <div className="hidden md:flex items-center gap-3">
-            {loading ? null : user ? (
-              <>
-                <a href="/portefeuille" className="flex items-center gap-2 text-sm text-text-secondary hover:text-text transition-colors px-4 py-2">
-                  <User size={16} />
-                  <span className="max-w-[120px] truncate">{user.displayName || user.email}</span>
-                </a>
-                <button onClick={handleLogout} className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text transition-colors px-3 py-2">
-                  <LogOut size={14} />
-                  Quitter
-                </button>
-              </>
-            ) : (
-              <>
-                <a href="/connexion" className="text-sm text-text-secondary hover:text-text transition-colors px-4 py-2">Connexion</a>
-                <a href="/inscription" className="text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg font-medium transition-colors">S&apos;inscrire</a>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-      {/* Overlay */}
+    <>
+      {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setOpen(false)}>
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
         </div>
       )}
 
+      {/* Mobile toggle */}
+      <button onClick={() => setOpen(true)} className="fixed top-4 left-4 z-30 md:hidden text-text p-2 bg-surface/80 backdrop-blur rounded-lg border border-border">
+        <Menu size={22} />
+      </button>
+
       {/* Sidebar */}
-      <div className={`fixed top-0 left-0 z-50 h-full w-72 bg-surface/95 backdrop-blur-xl border-r border-border transform transition-transform duration-300 ease-in-out md:hidden ${open ? "translate-x-0" : "-translate-x-full"}`}>
+      <aside className={`fixed top-0 left-0 z-50 h-full w-[260px] bg-surface/95 backdrop-blur-xl border-r border-border transform transition-all duration-300 ease-in-out ${open ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+        {/* Logo */}
         <div className="flex items-center justify-between px-4 h-16 border-b border-border">
-          <span className="font-bold">Menu</span>
-          <button onClick={() => setOpen(false)} className="text-text p-2">
-            <X size={24} />
+          <a href="/" className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold text-sm">K</div>
+            <span className="font-bold text-lg">KongoPay</span>
+          </a>
+          <button onClick={() => setOpen(false)} className="md:hidden text-text p-1">
+            <X size={20} />
           </button>
         </div>
-        <div className="px-4 py-4 space-y-3">
+
+        {/* Navigation */}
+        <nav className="px-3 py-4 space-y-1">
           {NAV_ITEMS.map((item) => (
-            <a key={item.href} href={item.href} onClick={() => setOpen(false)} className="block text-sm text-text-secondary hover:text-text py-2">{item.label}</a>
+            <a
+              key={item.href}
+              href={item.href}
+              onClick={() => setOpen(false)}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:text-text hover:bg-surface-light transition-colors"
+            >
+              <span>{item.label}</span>
+            </a>
           ))}
-          <hr className="border-border" />
-          {user ? (
-            <button onClick={() => { handleLogout(); setOpen(false); }} className="block w-full text-left text-sm text-danger hover:text-danger/80 py-2">Déconnexion</button>
+        </nav>
+
+        <hr className="border-border mx-3" />
+
+        {/* User area */}
+        <div className="px-3 py-4 space-y-1">
+          {loading ? null : user ? (
+            <>
+              <a href="/portefeuille" onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:text-text hover:bg-surface-light transition-colors"
+              >
+                <User size={16} />
+                <span className="truncate max-w-[140px]">{user.displayName || user.email}</span>
+              </a>
+              <button onClick={() => { handleLogout(); setOpen(false); }}
+                className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-danger hover:text-danger/80 hover:bg-surface-light transition-colors"
+              >
+                <LogOut size={16} />
+                <span>Quitter</span>
+              </button>
+            </>
           ) : (
             <>
-              <a href="/connexion" onClick={() => setOpen(false)} className="block text-sm text-text-secondary hover:text-text py-2">Connexion</a>
-              <a href="/inscription" onClick={() => setOpen(false)} className="block text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-lg font-medium text-center">S&apos;inscrire</a>
+              <a href="/connexion" onClick={() => setOpen(false)}
+                className="block px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:text-text hover:bg-surface-light transition-colors"
+              >
+                Connexion
+              </a>
+              <a href="/inscription" onClick={() => setOpen(false)}
+                className="block text-sm bg-primary hover:bg-primary/90 text-white px-5 py-2.5 rounded-lg font-medium text-center transition-colors mt-2"
+              >
+                S&apos;inscrire
+              </a>
             </>
           )}
         </div>
-      </div>
-    </header>
+      </aside>
+    </>
   );
 }
