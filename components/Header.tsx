@@ -30,7 +30,10 @@ export default function Header() {
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          <div className="flex items-center gap-8">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setOpen(!open)} className="md:hidden text-text p-2">
+              {open ? <X size={24} /> : <Menu size={24} />}
+            </button>
             <a href="/" className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center text-white font-bold text-sm">K</div>
               <span className="font-bold text-lg">KongoPay</span>
@@ -60,9 +63,6 @@ export default function Header() {
               </>
             )}
           </div>
-          <button onClick={() => setOpen(!open)} className="md:hidden text-text p-2">
-            {open ? <X size={24} /> : <Menu size={24} />}
-          </button>
         </div>
       </div>
       {/* Overlay */}
@@ -73,7 +73,7 @@ export default function Header() {
       )}
 
       {/* Sidebar */}
-      <div className={`fixed top-0 right-0 z-50 h-full w-72 bg-surface/95 backdrop-blur-xl border-l border-border transform transition-transform duration-300 ease-in-out md:hidden ${open ? "translate-x-0" : "translate-x-full"}`}>
+      <div className={`fixed top-0 left-0 z-50 h-full w-72 bg-surface/95 backdrop-blur-xl border-r border-border transform transition-transform duration-300 ease-in-out md:hidden ${open ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between px-4 h-16 border-b border-border">
           <span className="font-bold">Menu</span>
           <button onClick={() => setOpen(false)} className="text-text p-2">
