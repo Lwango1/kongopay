@@ -482,22 +482,28 @@ interface MarketStructure {
   imbalance: number;
 }
 
-function findPivots(prices: number[], lookback: number = 3): { price: number; isHigh: boolean; strength: number }[] {
+function findPivots(prices: number[], lookback: number = 3, minMovePct: number = 0): { price: number; isHigh: boolean; strength: number }[] {
   const pivots: { price: number; isHigh: boolean; strength: number }[] = [];
   for (let i = lookback; i < prices.length - lookback; i++) {
     const curr = prices[i];
     const left = prices.slice(i - lookback, i);
     const right = prices.slice(i + 1, i + lookback + 1);
 
-    const isHigh = left.every(p => curr > p) && right.every(p => curr > p);
-    const isLow = left.every(p => curr < p) && right.every(p => curr < p);
+    const highCheck = left.every(p => curr > p) && right.every(p => curr > p);
+    const lowCheck = left.every(p => curr < p) && right.every(p => curr < p);
 
-    if (isHigh) {
+    if (highCheck || lowCheck) {
+      const avgNeighbor = ([...left, ...right].reduce((a, b) => a + b, 0) / (lookback * 2));
+      const movePct = Math.abs(curr - avgNeighbor) / (avgNeighbor || 1);
+      if (movePct < minMovePct) continue;
+    }
+
+    if (highCheck) {
       const existing = pivots.find(p => p.isHigh && Math.abs(p.price - curr) / curr < CLUSTER_TOLERANCE);
       if (existing) { existing.strength++; existing.price = (existing.price + curr) / 2; }
       else pivots.push({ price: curr, isHigh: true, strength: 1 });
     }
-    if (isLow) {
+    if (lowCheck) {
       const existing = pivots.find(p => !p.isHigh && Math.abs(p.price - curr) / curr < CLUSTER_TOLERANCE);
       if (existing) { existing.strength++; existing.price = (existing.price + curr) / 2; }
       else pivots.push({ price: curr, isHigh: false, strength: 1 });
@@ -507,10 +513,12 @@ function findPivots(prices: number[], lookback: number = 3): { price: number; is
 }
 
 function analyzeMarketStructure(prices: number[]): MarketStructure {
-  const recent = prices.slice(-60);
+  const recent = prices.slice(-120);
   if (recent.length < 20) return { trend: "ranging", lastBreakout: null, liquiditySwept: false, imbalance: 0 };
 
-  const pivots = findPivots(recent, 5);
+  const atrPct = calculateATR(recent) / (recent.reduce((a, b) => a + b, 0) / recent.length);
+  const minMove = Math.max(atrPct * 1.5, 0.0005);
+  const pivots = findPivots(recent, 5, minMove);
   const highs = pivots.filter(p => p.isHigh).sort((a, b) => b.price - a.price);
   const lows = pivots.filter(p => !p.isHigh).sort((a, b) => a.price - b.price);
 
@@ -578,9 +586,14 @@ function findRealSR(prices: number[], currentPrice: number): {
   nearestResistance: SRLevel | null;
   allLevels: SRLevel[];
 } {
-  const pivots3 = findPivots(prices.slice(-80), 3);
-  const pivots5 = findPivots(prices.slice(-120), 5);
-  const pivots8 = findPivots(prices.slice(-200), 8);
+  const avgPrice = prices.slice(-20).reduce((a, b) => a + b, 0) / 20 || 1;
+  const atrPct = calculateATR(prices.slice(-100)) / avgPrice;
+  const minMove3 = Math.max(atrPct * 1.2, 0.0003);
+  const minMove5 = Math.max(atrPct * 1.5, 0.0005);
+  const minMove8 = Math.max(atrPct * 2.0, 0.0008);
+  const pivots3 = findPivots(prices.slice(-80), 3, minMove3);
+  const pivots5 = findPivots(prices.slice(-120), 5, minMove5);
+  const pivots8 = findPivots(prices.slice(-200), 8, minMove8);
 
   const allPivots = [...pivots3, ...pivots5, ...pivots8];
   const clusters: { price: number; strength: number; isHigh: boolean }[] = [];
@@ -595,13 +608,16 @@ function findRealSR(prices: number[], currentPrice: number): {
     }
   }
 
+  // Filtrer : strength minimum 3 (détecté par au moins 2 fonctions de lookback)
+  const minClusterStrength = 3;
+
   const supports: SRLevel[] = clusters
-    .filter(c => c.price < currentPrice)
+    .filter(c => c.strength >= minClusterStrength && c.price < currentPrice)
     .map(c => ({ price: c.price, strength: c.strength, type: "support" as const }))
     .sort((a, b) => b.price - a.price);
 
   const resistances: SRLevel[] = clusters
-    .filter(c => c.price > currentPrice)
+    .filter(c => c.strength >= minClusterStrength && c.price > currentPrice)
     .map(c => ({ price: c.price, strength: c.strength, type: "resistance" as const }))
     .sort((a, b) => a.price - b.price);
 
@@ -1019,7 +1035,7 @@ export function predictSpike(type: IndexType, num: number) {
   // Strict filters: only signal when level is touched + TF confluence + min volatility
   const signalCooldownMs = 6 * 60 * 60 * 1000; // 6h between signals per market (~max 1-2 signaux par jour)
   const timeSincePrevSignal = Date.now() - st.prevSignalTime;
-  const minVolScale = 0.8; // skip extremely calm markets
+  const minVolScale = 0.8;
   const minTfConfluence = Math.min(tfConfluence, 3);
 
   // Un signal à contre-tendance quotidienne nécessite une probabilité bien plus élevée
