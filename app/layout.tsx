@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Script from "next/script";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import NotificationSetup from "@/components/NotificationSetup";
 
 export const metadata: Metadata = {
   title: "KongoPay - Achetez et Vendez des Cryptos",
@@ -27,7 +28,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             strategy="afterInteractive"
           />
         )}
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          {children}
+          <NotificationSetup />
+        </AuthProvider>
       </body>
     </html>
   );

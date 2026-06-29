@@ -1,6 +1,6 @@
 import admin from 'firebase-admin';
 
-let messaging: admin.messaging.Messaging | null = null;
+let messaging: any = null;
 
 try {
   if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {

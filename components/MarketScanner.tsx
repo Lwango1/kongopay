@@ -24,6 +24,13 @@ const INDICES_CONFIG: Record<string, { color: string; bgColor: string }> = {
 
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
 
+function sendBrowserNotification(title: string, body: string) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  try {
+    new Notification(title, { body, icon: "/icon.png", tag: "signal", requireInteraction: true });
+  } catch {}
+}
+
 function AlertBanner({ opportunity }: { opportunity: Opportunity }) {
   const cfg = INDICES_CONFIG[opportunity.label];
   const sr = opportunity.srAlert;
@@ -173,6 +180,13 @@ export default function MarketScanner() {
           const newOpps = data.opportunities.filter(o =>
             newAlerts.includes(`${o.type}_${o.number}`)
           );
+          for (const opp of newOpps) {
+            const dirLabel = opp.expectedDirection === "up" ? "Hausse" : "Baisse";
+            sendBrowserNotification(
+              `Signal ${opp.label}`,
+              `${dirLabel} — ${opp.spikeProbability}% — Entry $${opp.entryPrice?.toFixed(2) ?? "—"}`
+            );
+          }
           for (const opp of newOpps) {
             await saveSignal({
               key: `${opp.type}_${opp.number}`,

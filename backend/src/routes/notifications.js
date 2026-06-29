@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { notificationService } from '../services/notifications.js';
-import { registerToken, unregisterToken } from '../services/pushNotifications.js';
+import { registerToken, unregisterToken, broadcastSignal } from '../services/pushNotifications.js';
 
 const router = Router();
 
@@ -56,6 +56,20 @@ router.delete('/register-token', authenticate, async (req, res, next) => {
   try {
     await unregisterToken(req.user.uid);
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/send-signal', authenticate, async (req, res, next) => {
+  try {
+    const { title, body, data } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ error: 'title et body requis' });
+    }
+    const signal = { label: title, spikeProbability: parseInt(data?.probability) || 0 };
+    await broadcastSignal(signal);
+    res.json({ sent: true });
   } catch (err) {
     next(err);
   }
