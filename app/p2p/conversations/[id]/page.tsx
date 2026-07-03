@@ -240,6 +240,14 @@ export default function ConversationPage() {
                   Commander
                 </button>
               </div>
+              {amount && chat && (
+                <div className="mt-3 flex items-center justify-between bg-background rounded-lg px-4 py-2.5 text-sm">
+                  <span className="text-text-muted">Tu reçois</span>
+                  <span className="font-bold font-mono text-primary">
+                    {(parseFloat(amount) / chat.offerPricePerUnit).toFixed(6)} {chat.offerCrypto}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
