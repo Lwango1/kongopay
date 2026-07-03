@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, X, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
+import { Plus, X, TrendingUp, TrendingDown, RefreshCw, MessageSquare, MessageCircle } from "lucide-react";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
+import Link from "next/link";
 
 interface P2POffer {
   id: string;
@@ -35,7 +36,6 @@ export default function P2PPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Form state
   const [formType, setFormType] = useState<"buy" | "sell">("sell");
   const [formCrypto, setFormCrypto] = useState("USDT");
   const [formFiat, setFormFiat] = useState("");
@@ -43,6 +43,8 @@ export default function P2PPage() {
   const [formMethod, setFormMethod] = useState("Airtel Money");
   const [formMin, setFormMin] = useState("");
   const [formMax, setFormMax] = useState("");
+
+  const [startingChat, setStartingChat] = useState<string | null>(null);
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -113,6 +115,21 @@ export default function P2PPage() {
     }
   };
 
+  const handleStartChat = async (offerId: string) => {
+    setStartingChat(offerId);
+    setError("");
+    try {
+      const chat = await apiFetch<{ id: string }>("/p2p/chats", {
+        method: "POST",
+        body: JSON.stringify({ offerId }),
+      });
+      window.location.href = `/p2p/conversations/${chat.id}`;
+    } catch (err: any) {
+      setError(err.message);
+      setStartingChat(null);
+    }
+  };
+
   const filteredOffers = offers.filter((o) => {
     if (filterType !== "all" && o.type !== filterType) return false;
     if (filterCrypto !== "all" && o.crypto !== filterCrypto) return false;
@@ -132,6 +149,14 @@ export default function P2PPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              <Link href="/p2p/trades"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-text-secondary hover:text-text hover:bg-surface transition-colors text-sm font-medium">
+                <MessageSquare size={16} /> Transactions
+              </Link>
+              <Link href="/p2p/conversations"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-text-secondary hover:text-text hover:bg-surface transition-colors text-sm font-medium">
+                <MessageCircle size={16} /> Discussions
+              </Link>
               <button onClick={fetchOffers} className="p-2 rounded-lg border border-border hover:bg-surface transition-colors">
                 <RefreshCw size={18} className="text-text-muted" />
               </button>
@@ -186,7 +211,7 @@ export default function P2PPage() {
                   <label className="text-xs text-text-muted mb-1 block">Prix unitaire (CDF)</label>
                   <input type="number" value={formPrice} onChange={(e) => setFormPrice(e.target.value)}
                     className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-text outline-none focus:border-primary"
-                    placeholder="2600" required />
+                    placeholder="2700" required />
                 </div>
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">Paiement</label>
@@ -284,12 +309,19 @@ export default function P2PPage() {
                       <span className="text-xs text-text-muted">
                         {new Date(offer.createdAt).toLocaleDateString("fr-FR")}
                       </span>
-                      {user && offer.userId === user.uid && (
-                        <button onClick={() => handleCancelOffer(offer.id)}
-                          className="text-xs text-danger hover:underline">Annuler</button>
-                      )}
                     </div>
                   </div>
+
+                  {user && offer.userId !== user.uid && offer.status === "active" && (
+                    <div className="mt-3 pt-3 border-t border-border">
+                      <button onClick={() => handleStartChat(offer.id)}
+                        disabled={startingChat === offer.id}
+                        className="w-full py-2 rounded-lg border border-primary/30 text-primary hover:bg-primary/5 transition-colors text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
+                        <MessageCircle size={16} />
+                        {startingChat === offer.id ? "Ouverture..." : "Discuter"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
