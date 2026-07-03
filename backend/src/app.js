@@ -64,7 +64,7 @@ app.use('/api/admin', authLimiter, adminRoutes);
 app.use('/api/mobile-money', authLimiter, mobileMoneyRoutes);
 app.use('/api/deriv', authLimiter, derivRoutes);
 app.use('/api/crypto', authLimiter, cryptoRoutes);
-app.use('/api/p2p', authLimiter, p2pRoutes);
+app.use('/api/p2p', p2pRoutes);
 app.use('/api/kyc', authLimiter, kycRoutes);
 app.use('/api/subscription', authLimiter, subscriptionRoutes);
 app.use('/api/engagement', authLimiter, engagementRoutes);
