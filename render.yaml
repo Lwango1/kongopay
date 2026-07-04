@@ -21,5 +21,17 @@ services:
         sync: false
       - key: BINANCE_API_SECRET
         sync: false
+      - key: P2P_ADMIN_UID
+        value: TOkdYT0y2mR0EZ3FGnXniQbTuGk2
+      - key: ADMIN_UID
+        value: TOkdYT0y2mR0EZ3FGnXniQbTuGk2
+      - key: P2P_ADMIN_BINANCE_WALLET
+        value: 0xb365cfcd75f6425e05eb072a7c97032c8d21ad28
+      - key: AIRTEL_MONEY_NUMBER
+        value: "+243996710821"
+      - key: ORANGE_MONEY_NUMBER
+        value: "+243996710821"
+      - key: MPESA_NUMBER
+        value: "+243996710821"
       - key: PORT
         value: "10000"
