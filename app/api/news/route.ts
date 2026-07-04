@@ -6,28 +6,13 @@ export const revalidate = 300;
 
 export async function GET() {
   try {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
-
-    // Try backend first
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 4000);
-      const res = await fetch(`${backendUrl}/api/news`, {
-        signal: controller.signal,
-        headers: { "Accept": "application/json" },
-      });
-      clearTimeout(timeout);
-      if (res.ok) {
-        const data = await res.json();
-        return NextResponse.json({ ...data, source: "backend" });
-      }
-    } catch {}
-
-    // Fallback: Finnhub API (si clé configurée)
+    // Finnhub API en priorité
     const finnhubKey = process.env.FINNHUB_API_KEY;
     if (finnhubKey) {
       try {
-        const fhRes = await fetch(`https://finnhub.io/api/v1/calendar/economic?token=${finnhubKey}`);
+        const fhRes = await fetch(`https://finnhub.io/api/v1/calendar/economic?token=${finnhubKey}`, {
+          next: { revalidate: 300 },
+        });
         if (fhRes.ok) {
           const json = await fhRes.json();
           const calendar: any[] = json.economicCalendar || [];
@@ -48,7 +33,9 @@ export async function GET() {
               sentiment: null,
               confidence: 0,
             }));
-          return NextResponse.json({ events, signals: [], marketContext: { trend: "ranging", volatility: "medium" }, source: "finnhub-api", timestamp: Date.now() });
+          if (events.length > 0) {
+            return NextResponse.json({ events, signals: [], marketContext: { trend: "ranging", volatility: "medium" }, source: "finnhub", timestamp: Date.now() });
+          }
         }
       } catch {}
     }
@@ -60,7 +47,7 @@ export async function GET() {
       signals: data.signals,
       marketContext: data.marketContext,
       activeTrades: [],
-      source: "local",
+      source: "simulated",
       timestamp: Date.now(),
     });
   } catch (err) {

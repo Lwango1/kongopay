@@ -2,5 +2,9 @@
   "framework": "nextjs",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
-  "installCommand": "npm install"
+  "installCommand": "npm install",
+  "env": {
+    "FINNHUB_API_KEY": "d8q01kpr01qr03ncmlngd8q01kpr01qr03ncmlo0",
+    "NEXT_PUBLIC_ADSENSE_ID": "pub-7941414743853220"
+  }
 }

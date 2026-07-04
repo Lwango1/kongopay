@@ -123,9 +123,10 @@ function SignalCard({ signal }: { signal: NewsSignal }) {
 }
 
 export default function NewsTrader() {
-  const [data, setData] = useState<{ events: EconomicEvent[]; signals: NewsSignal[]; marketContext: any } | null>(null);
+  const [data, setData] = useState<{ events: EconomicEvent[]; signals: NewsSignal[]; marketContext: any; source?: string } | null>(null);
   const [filter, setFilter] = useState<"all" | EconomicEvent["impact"]>("all");
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState<string>("");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -134,6 +135,7 @@ export default function NewsTrader() {
       if (res.ok) {
         const json = await res.json();
         setData(json);
+        setSource(json.source || "");
       }
     } catch {
       // fallback silencieux
@@ -159,9 +161,20 @@ export default function NewsTrader() {
           <div className="flex items-center gap-3 mb-1">
             <Newspaper size={24} className="text-primary" />
             <h2 className="text-2xl font-bold">News Trading</h2>
+            {source === "finnhub" ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold animate-pulse">
+                ● EN DIRECT
+              </span>
+            ) : source === "simulated" ? (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/20 text-warning font-semibold">
+                SIMULÉ
+              </span>
+            ) : null}
           </div>
           <p className="text-text-secondary text-sm">
-            Anticipez les mouvements du marché avant les annonces économiques majeures.
+            {source === "finnhub"
+              ? "Données en temps réel depuis Finnhub."
+              : "Anticipez les mouvements du marché avant les annonces économiques majeures."}
           </p>
         </div>
         <button onClick={fetchData} disabled={loading}
