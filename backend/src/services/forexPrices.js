@@ -1,11 +1,11 @@
-// Prix forex en temps réel depuis Deriv WebSocket
-// Paires USD supportées : EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD
+// Prix forex et XAU/USD (Gold) en temps réel depuis Deriv WebSocket
+// Paires supportées : EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD, XAU/USD
 
 import WebSocket from 'ws';
 
 const FOREX_SYMBOLS = [
   'frxEURUSD', 'frxGBPUSD', 'frxUSDJPY', 'frxUSDCHF',
-  'frxAUDUSD', 'frxUSDCAD', 'frxNZDUSD',
+  'frxAUDUSD', 'frxUSDCAD', 'frxNZDUSD', 'frxXAUUSD',
 ];
 
 const DERIV_TOKEN = process.env.DERIV_TOKEN || '';
@@ -22,7 +22,8 @@ class ForexPriceService {
     this.reconnectDelay = 2000;
 
     for (const sym of FOREX_SYMBOLS) {
-      this.prices.set(sym, { bid: 0, ask: 0, price: 0, timestamp: 0 });
+      const fallback = sym === 'frxXAUUSD' ? 2320.00 : 0;
+      this.prices.set(sym, { bid: fallback, ask: fallback, price: fallback, timestamp: 0 });
     }
   }
 
@@ -116,6 +117,11 @@ class ForexPriceService {
   priceForCurrency(currency) {
     if (currency === 'USD') return this.priceForPair('EURUSD');
     return this.priceForPair(`${currency}USD`);
+  }
+
+  // Get XAUUSD (Gold) price
+  getGoldPrice() {
+    return this.getPrice('frxXAUUSD') || 2320.00;
   }
 }
 

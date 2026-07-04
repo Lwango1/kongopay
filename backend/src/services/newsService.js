@@ -175,28 +175,60 @@ function analyzeEvent(event) {
   const parsePct = (s) => parseFloat(String(s).replace('%', '').replace('+', '')) || 0;
   const prevVal = parsePct(event.previous);
   const forecastVal = parsePct(event.forecast);
+  const actualVal = event.actual != null ? parsePct(event.actual) : null;
 
   const impactScores = { high: 3, medium: 2, low: 1 };
   const baseScore = impactScores[event.impact] || 1;
-  const forecastDiff = forecastVal - prevVal;
-  const absDiff = Math.abs(forecastDiff);
 
   let direction = null;
   let probability = 50 + baseScore * 8;
 
-  if (absDiff > 0.3) {
-    direction = forecastDiff > 0 ? 'up' : 'down';
-    probability += Math.min(absDiff * 5, 15);
+  if (event.status === 'done' && actualVal !== null) {
+    // Post-annonce: comparer Actual vs Forecast (le marché réagit à la surprise)
+    const surprise = actualVal - forecastVal;
+    const absSurprise = Math.abs(surprise);
+    if (absSurprise > 0.1) {
+      direction = surprise > 0 ? 'up' : 'down';
+      probability += Math.min(absSurprise * 25, 35);
+    }
+  } else {
+    // Pré-annonce: comparer Previous vs Forecast
+    const forecastDiff = forecastVal - prevVal;
+    const absDiff = Math.abs(forecastDiff);
+    if (absDiff > 0.3) {
+      direction = forecastDiff > 0 ? 'up' : 'down';
+      probability += Math.min(absDiff * 5, 15);
+    }
   }
 
   if (event.impact === 'high') probability += 10;
-  probability = Math.min(Math.max(probability, 30), 92);
+  probability = Math.min(Math.max(probability, 30), 95);
 
   return {
     direction,
     probability: Math.round(probability),
     impact: event.impact,
   };
+}
+
+// Sentiment post-annonce (Actual vs Forecast)
+function computeSentiment(event) {
+  if (!event.actual) return { sentiment: 'neutral', confidence: 0 };
+
+  const parsePct = (s) => parseFloat(String(s).replace('%', '').replace('+', '')) || 0;
+  const actualVal = parsePct(event.actual);
+  const forecastVal = parsePct(event.forecast);
+  const prevVal = parsePct(event.previous);
+
+  const beat = actualVal > forecastVal;
+  const miss = actualVal < forecastVal;
+  const surprise = Math.abs(actualVal - forecastVal);
+
+  if (beat && surprise > 0.3) return { sentiment: 'bullish', confidence: Math.min(surprise * 25, 95) };
+  if (miss && surprise > 0.3) return { sentiment: 'bearish', confidence: Math.min(surprise * 25, 95) };
+  if (surprise < 0.1) return { sentiment: 'neutral', confidence: 40 };
+
+  return { sentiment: beat ? 'bullish' : 'bearish', confidence: 50 + surprise * 15 };
 }
 
 // Récupération principale
@@ -273,48 +305,101 @@ export async function getEconomicCalendar() {
     source = 'empty';
   }
 
-  // Prix réels depuis Deriv (ou fallback hardcodé)
+  // Prix réels depuis Deriv
   const { forexPrices } = await import('./forexPrices.js');
-  const pipSize = (cur) => cur === 'JPY' ? 0.01 : 0.0001;
+  const pipSize = (cur) => cur === 'JPY' || cur === 'XAU' ? 0.01 : 0.0001;
 
-  const signals = events
-    .filter(e => e.status !== 'done' && e.impact !== 'low')
-    .slice(0, 12)
-    .map(e => {
-      const analysis = analyzeEvent(e);
-      const tp1 = Math.round((analysis.direction === 'up' ? 1 : -1) * 0.5 * analysis.probability);
-      const tp2 = Math.round((analysis.direction === 'up' ? 1 : -1) * 1.0 * analysis.probability);
-      const sl = Math.round((analysis.direction === 'up' ? -1 : 1) * 0.3 * analysis.probability);
+  // Compute sentiment for all done events
+  for (const ev of events) {
+    if (ev.status === 'done' && ev.actual) {
+      const result = computeSentiment(ev);
+      ev.sentiment = result.sentiment;
+      ev.confidence = result.confidence;
+    } else {
+      ev.sentiment = null;
+      ev.confidence = 0;
+    }
+  }
 
-      const basePrice = forexPrices.priceForCurrency(e.currency) || 1.08;
-      const pip = pipSize(e.currency);
-      const slPips = e.impact === 'high' ? 40 : e.impact === 'medium' ? 25 : 15;
-      const tpPips = Math.round(slPips * (1.5 + analysis.probability / 200));
-      const dir = analysis.direction === 'up' ? 1 : analysis.direction === 'down' ? -1 : 0;
-      const entry = basePrice;
-      const stopLoss = +(entry - dir * slPips * pip).toFixed(e.currency === 'JPY' ? 2 : 5);
-      const takeProfit = +(entry + dir * tpPips * pip).toFixed(e.currency === 'JPY' ? 2 : 5);
+  function buildSignal(e, analysis, pair, basePrice, window, reasoning) {
+    const pip = pipSize(pair.replace('USD', ''));
+    const slPips = e.status === 'done' ? (e.impact === 'high' ? 30 : 20) : (e.impact === 'high' ? 40 : 25);
+    const tpPips = Math.round(slPips * (1.5 + analysis.probability / 200));
+    const dir = analysis.direction === 'up' ? 1 : -1;
+    const side = analysis.direction === 'up' ? 'buy' : 'sell';
+    const entry = basePrice;
+    const decimals = pair === 'XAUUSD' ? 2 : e.currency === 'JPY' ? 2 : 5;
 
-      const side = analysis.direction === 'up' ? 'buy' : analysis.direction === 'down' ? 'sell' : null;
+    return {
+      event: e,
+      direction: analysis.direction,
+      side,
+      probability: analysis.probability,
+      reasoning,
+      entryWindow: window,
+      pair,
+      entry,
+      stopLoss: +(entry - dir * slPips * pip).toFixed(decimals),
+      takeProfit: +(entry + dir * tpPips * pip).toFixed(decimals),
+      targets: {
+        tp1: `${Math.round(0.5 * analysis.probability)} pips`,
+        tp2: `${Math.round(1.0 * analysis.probability)} pips`,
+        sl: `${Math.round(0.3 * analysis.probability)} pips`,
+      },
+    };
+  }
 
-      return {
-        event: e,
-        direction: analysis.direction,
-        side,
-        probability: analysis.probability,
-        reasoning: `${e.title} — Prévision: ${e.forecast} vs Précédent: ${e.previous}. ${analysis.direction === 'up' ? 'Hausse anticipée' : analysis.direction === 'down' ? 'Baisse anticipée' : 'Direction neutre'}.`,
-        entryWindow: 'Session principale',
-        pair: e.currency === 'USD' ? 'EURUSD' : `${e.currency}USD`,
-        entry,
-        stopLoss,
-        takeProfit,
-        targets: {
-          tp1: `${Math.abs(tp1)} pips`,
-          tp2: `${Math.abs(tp2)} pips`,
-          sl: `${Math.abs(sl)} pips`,
-        },
-      };
-    });
+  const signals = [];
+
+  // 1. Upcoming events (pré-annonce)
+  for (const e of events) {
+    if (e.status === 'done' || e.impact === 'low') continue;
+    if (signals.length >= 12) break;
+
+    const analysis = analyzeEvent(e);
+    if (!analysis.direction) continue;
+
+    const pair = e.currency === 'USD' ? 'EURUSD' : `${e.currency}USD`;
+    const basePrice = forexPrices.priceForCurrency(e.currency) || 1.08;
+    const reasoning = `${e.title} — Prév: ${e.forecast} vs Préc: ${e.previous}. ${analysis.direction === 'up' ? 'Hausse' : 'Baisse'} anticipée sur ${pair}.`;
+
+    signals.push(buildSignal(e, analysis, pair, basePrice, 'Avant publication', reasoning));
+
+    // XAUUSD pour les USD events haut impact
+    if (e.currency === 'USD' && e.impact === 'high') {
+      const goldPrice = forexPrices.getGoldPrice();
+      const xauDir = analysis.direction === 'up' ? 'down' : 'up';
+      const analysisXau = { ...analysis, direction: xauDir };
+      const goldReasoning = `${e.title} → USD ${analysis.direction === 'up' ? 'fort' : 'faible'} → XAU/USD ${xauDir === 'up' ? 'rachat' : 'repli'} (corrélation inverse).`;
+
+      signals.push(buildSignal(e, analysisXau, 'XAUUSD', goldPrice, 'Avant publication', goldReasoning));
+    }
+  }
+
+  // 2. Done events avec surprise significative (post-annonce)
+  for (const e of events) {
+    if (e.status !== 'done' || !e.actual || e.impact === 'low') continue;
+    if (signals.length >= 16) break;
+
+    const analysis = analyzeEvent(e);
+    if (!analysis.direction || analysis.probability < 60) continue;
+
+    const pair = e.currency === 'USD' ? 'EURUSD' : `${e.currency}USD`;
+    const basePrice = forexPrices.priceForCurrency(e.currency) || 1.08;
+    const reasoning = `${e.title} — Réel: ${e.actual} vs Prév: ${e.forecast}. Surprise ${analysis.direction === 'up' ? 'haussière' : 'baissière'}. Trading post-annonce.`;
+
+    signals.push(buildSignal(e, analysis, pair, basePrice, 'Post-annonce (retracement)', reasoning));
+
+    // XAUUSD post-annonce
+    if (e.currency === 'USD' && e.impact === 'high') {
+      const goldPrice = forexPrices.getGoldPrice();
+      const xauDir = analysis.direction === 'up' ? 'down' : 'up';
+      const analysisXau = { ...analysis, direction: xauDir };
+      const goldReasoning = `${e.title} → USD ${e.sentiment === 'bullish' ? 'fort' : 'faible'} → XAU/USD ${xauDir === 'up' ? 'rachat' : 'repli'} post-annonce.`;
+
+      signals.push(buildSignal(e, analysisXau, 'XAUUSD', goldPrice, 'Post-annonce (retracement)', goldReasoning));
+    }
+  }
 
   const result = {
     events,

@@ -33,6 +33,11 @@ function SentimentBadge({ sentiment, confidence }: { sentiment: EconomicEvent["s
   return <span className={`text-xs font-bold ${colors[sentiment]}`}>{sentiment === "bullish" ? "📈 " : sentiment === "bearish" ? "📉 " : "➖ "}{confidence}%</span>;
 }
 
+function formatPrice(price: number, pair: string): string {
+  const decimals = pair === "XAUUSD" ? 2 : pair.includes("JPY") ? 2 : 5;
+  return price.toFixed(decimals);
+}
+
 function SignalCard({ signal }: { signal: NewsSignal }) {
   const dirColors = {
     up: "border-success/30 bg-success/5",
@@ -77,7 +82,7 @@ function SignalCard({ signal }: { signal: NewsSignal }) {
             <div className={`h-full rounded-full ${signal.probability > 70 ? "bg-success" : signal.probability > 50 ? "bg-warning" : "bg-danger"}`}
               style={{ width: `${signal.probability}%` }} />
           </div>
-          <span className={`font-bold font-mono text-xs ${signal.probability > 70 ? "text-success" : signal.probability > 50 ? "text-warning" : "text-danger"}`}>
+          <span className={`font-bold font-mono text-xs ${signal.probability > 70 ? "text-success" : signal.probability > 50 ? "bg-warning" : "bg-danger"}`}>
             {signal.probability}%
           </span>
         </div>
@@ -90,15 +95,15 @@ function SignalCard({ signal }: { signal: NewsSignal }) {
         </div>
         <div className="text-center">
           <span className="text-text-muted block">Entry</span>
-          <span className="text-text font-mono font-bold">{signal.entry.toFixed(5)}</span>
+          <span className="text-text font-mono font-bold">{formatPrice(signal.entry, signal.pair)}</span>
         </div>
         <div className="text-center">
           <span className="text-text-muted block">TP</span>
-          <span className="text-success font-mono font-bold">{signal.takeProfit.toFixed(5)}</span>
+          <span className="text-success font-mono font-bold">{formatPrice(signal.takeProfit, signal.pair)}</span>
         </div>
         <div className="text-center">
           <span className="text-text-muted block">SL</span>
-          <span className="text-danger font-mono font-bold">{signal.stopLoss.toFixed(5)}</span>
+          <span className="text-danger font-mono font-bold">{formatPrice(signal.stopLoss, signal.pair)}</span>
         </div>
       </div>
 
