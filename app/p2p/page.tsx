@@ -178,11 +178,11 @@ export default function P2PPage() {
           {user && offerLimit && (
             <div className="mb-6 px-4 py-2.5 rounded-xl bg-surface border border-border text-sm flex items-center justify-between">
               <span className="text-text-secondary">
-                {offerLimit.plan === "premium"
-                  ? "Abonnement Premium : annonces illimitées"
+                {offerLimit.plan === "premium" || offerLimit.plan === "admin"
+                  ? "Annonces illimitées"
                   : `Annonces gratuites : ${offerLimit.remaining} / ${offerLimit.max} restantes`}
               </span>
-              {offerLimit.plan !== "premium" && (
+              {offerLimit.plan !== "premium" && offerLimit.plan !== "admin" && (
                 <a href="/abonnement" className="text-primary hover:underline text-xs font-medium">
                   Passer Premium
                 </a>

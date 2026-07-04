@@ -2,6 +2,17 @@ import { db, admin } from '../config/firebase.js';
 
 const SUBSCRIPTION_COLLECTION = 'subscriptions';
 
+async function isFirebaseAdmin(uid) {
+  try {
+    const { auth } = await import('../config/firebase.js');
+    const user = await auth.getUser(uid);
+    const claims = user.customClaims || {};
+    return !!claims.admin;
+  } catch {
+    return false;
+  }
+}
+
 const PLANS = {
   free: {
     name: 'Gratuit',
@@ -72,6 +83,9 @@ export class SubscriptionService {
   }
 
   async canAccessSignal(userId) {
+    const isAdmin = await isFirebaseAdmin(userId);
+    if (isAdmin) return { allowed: true, plan: 'admin' };
+
     const status = await this.getStatus(userId);
     if (status.isPremium && status.premiumUntil && new Date(status.premiumUntil) > new Date()) {
       return { allowed: true, plan: 'premium' };
@@ -98,6 +112,9 @@ export class SubscriptionService {
   }
 
   async canCreateP2POffer(userId) {
+    const isAdmin = await isFirebaseAdmin(userId);
+    if (isAdmin) return { allowed: true, plan: 'admin' };
+
     const status = await this.getStatus(userId);
     if (status.isPremium && status.premiumUntil && new Date(status.premiumUntil) > new Date()) {
       return { allowed: true, plan: 'premium' };
@@ -183,6 +200,9 @@ export class SubscriptionService {
   }
 
   async getSignalUsage(userId) {
+    const isAdmin = await isFirebaseAdmin(userId);
+    if (isAdmin) return { used: 0, limit: -1, remaining: -1, plan: 'admin' };
+
     const status = await this.getStatus(userId);
     if (status.isPremium && status.premiumUntil && new Date(status.premiumUntil) > new Date()) {
       return { used: 0, limit: -1, remaining: -1, plan: 'premium' };
@@ -193,6 +213,9 @@ export class SubscriptionService {
   }
 
   async getP2POfferUsage(userId) {
+    const isAdmin = await isFirebaseAdmin(userId);
+    if (isAdmin) return { active: 0, max: -1, remaining: -1, plan: 'admin' };
+
     const status = await this.getStatus(userId);
     if (status.isPremium && status.premiumUntil && new Date(status.premiumUntil) > new Date()) {
       return { active: 0, max: -1, remaining: -1, plan: 'premium' };
