@@ -12,6 +12,7 @@ const NAV_ITEMS: ({ label: string; href: string } | { type: "divider" })[] = [
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
   { label: "Performance", href: "/performance" },
+  { label: "Signaux", href: "/signaux" },
   { label: "Blog", href: "/blog" },
   { label: "Apprendre", href: "/apprendre" },
   { label: "À propos", href: "/a-propos" },

@@ -8,6 +8,7 @@ const FOOTER_SECTIONS = [
       { label: "Convertisseur", href: "/portefeuille" },
       { label: "Frais", href: "/frais" },
       { label: "Performance", href: "/performance" },
+      { label: "Signaux Trading", href: "/signaux" },
     ],
   },
   {
