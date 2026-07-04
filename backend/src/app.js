@@ -56,7 +56,7 @@ app.use('/api/', apiLimiter);
 
 initializeFirebase();
 
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth', apiLimiter, authRoutes);
 app.use('/api/wallet', authLimiter, walletRoutes);
 app.use('/api/news', newsRoutes);
 app.use('/api/trading', authLimiter, tradingRoutes);

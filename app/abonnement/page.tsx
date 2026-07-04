@@ -44,18 +44,24 @@ export default function AbonnementPage() {
     if (authLoading) return;
     if (!user) { router.push("/connexion"); return; }
 
+    const defaultPlans = {
+      free: { name: "Gratuit", priceCdf: 0, signalsPerDay: 4, maxP2POffers: 2 },
+      premium: { name: "Premium", priceCdf: 7000, priceUsd: 2.7, signalsPerDay: -1, maxP2POffers: -1, durationDays: 30 },
+    };
+
     const load = async () => {
       try {
-        const [plansData, statusData, walletData] = await Promise.all([
+        const results = await Promise.allSettled([
           apiFetch<{ free: Plan; premium: Plan }>("/subscription/plans"),
           apiFetch<SubscriptionStatus>("/subscription/status"),
           apiFetch<WalletData>("/wallet/balance"),
         ]);
-        setPlans(plansData);
-        setStatus(statusData);
-        setWallet(walletData);
-      } catch (err: any) {
-        setError(err.message);
+        if (results[0].status === "fulfilled") setPlans(results[0].value);
+        else setPlans(defaultPlans);
+        if (results[1].status === "fulfilled") setStatus(results[1].value);
+        if (results[2].status === "fulfilled") setWallet(results[2].value);
+      } catch {
+        setPlans(defaultPlans);
       } finally {
         setLoading(false);
       }
