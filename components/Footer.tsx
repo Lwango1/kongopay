@@ -24,7 +24,7 @@ const FOOTER_SECTIONS = [
     title: "À propos",
     links: [
       { label: "À propos de nous", href: "/a-propos" },
-      { label: "Nous contacter", href: "/a-propos" },
+      { label: "Nous contacter", href: "/contact" },
       { label: "Conditions d'utilisation", href: "/conditions" },
       { label: "Confidentialité", href: "/confidentialite" },
       { label: "Avis de Risque", href: "/conditions" },
@@ -47,8 +47,15 @@ export default function Footer() {
               pour l&apos;Afrique francophone.
             </p>
             <div className="flex gap-3">
-              {["X", "In", "Tg", "Fb", "Yt"].map((s) => (
-                <a key={s} href="#" className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center text-xs text-text-muted hover:bg-surface-light transition-colors">{s}</a>
+              {[
+                { label: "X", href: "https://x.com/kongopay" },
+                { label: "In", href: "https://linkedin.com/company/kongopay" },
+                { label: "Tg", href: "https://t.me/kongopay" },
+                { label: "Fb", href: "https://facebook.com/kongopay" },
+                { label: "Yt", href: "https://youtube.com/@kongopay" },
+              ].map((s) => (
+                <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer"
+                  className="w-8 h-8 rounded-lg bg-surface flex items-center justify-center text-xs text-text-muted hover:bg-surface-light transition-colors">{s.label}</a>
               ))}
             </div>
           </div>

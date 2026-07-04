@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://kongopay.vercel.app/</loc><priority>1.0</priority></url>
+  <url><loc>https://kongopay.vercel.app/blog</loc><priority>0.8</priority></url>
+  <url><loc>https://kongopay.vercel.app/apprendre</loc><priority>0.8</priority></url>
+  <url><loc>https://kongopay.vercel.app/a-propos</loc><priority>0.7</priority></url>
+  <url><loc>https://kongopay.vercel.app/contact</loc><priority>0.7</priority></url>
+  <url><loc>https://kongopay.vercel.app/frais</loc><priority>0.6</priority></url>
+  <url><loc>https://kongopay.vercel.app/confidentialite</loc><priority>0.5</priority></url>
+  <url><loc>https://kongopay.vercel.app/conditions</loc><priority>0.5</priority></url>
+  <url><loc>https://kongopay.vercel.app/connexion</loc><priority>0.4</priority></url>
+  <url><loc>https://kongopay.vercel.app/inscription</loc><priority>0.4</priority></url>
+  <url><loc>https://kongopay.vercel.app/abonnement</loc><priority>0.6</priority></url>
+  <url><loc>https://kongopay.vercel.app/p2p</loc><priority>0.6</priority></url>
+  <url><loc>https://kongopay.vercel.app/recompenses</loc><priority>0.5</priority></url>
+  <url><loc>https://kongopay.vercel.app/performance</loc><priority>0.5</priority></url>
+  <url><loc>https://kongopay.vercel.app/portefeuille</loc><priority>0.5</priority></url>
+</urlset>

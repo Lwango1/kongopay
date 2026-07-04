@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import AdBanner from "@/components/AdBanner";
 import NewsTrader from "@/components/NewsTrader";
 
 const GUIDES = [
@@ -109,6 +110,9 @@ export default function ApprendrePage() {
           </div>
         </section>
 
+        <div className="max-w-5xl mx-auto px-4 mb-8">
+          <AdBanner slot="learn-banner" format="horizontal" />
+        </div>
         <NewsTrader />
       </main>
       <Footer />

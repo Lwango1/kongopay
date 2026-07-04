@@ -5,7 +5,7 @@ import { Menu, X, LogOut, User } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 
-const NAV_ITEMS = [
+const NAV_ITEMS: ({ label: string; href: string } | { type: "divider" })[] = [
   { label: "Accueil", href: "/" },
   { label: "Récompenses", href: "/recompenses" },
   { label: "Abonnement", href: "/abonnement" },
@@ -15,6 +15,10 @@ const NAV_ITEMS = [
   { label: "Blog", href: "/blog" },
   { label: "Apprendre", href: "/apprendre" },
   { label: "À propos", href: "/a-propos" },
+  { type: "divider" as const },
+  { label: "Contact", href: "/contact" },
+  { label: "Confidentialité", href: "/confidentialite" },
+  { label: "Conditions", href: "/conditions" },
 ];
 
 export default function Header() {
@@ -56,16 +60,20 @@ export default function Header() {
 
         {/* Navigation */}
         <nav className="px-3 py-4 space-y-1">
-          {NAV_ITEMS.map((item) => (
-            <a
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:text-text hover:bg-surface-light transition-colors"
-            >
-              <span>{item.label}</span>
-            </a>
-          ))}
+          {NAV_ITEMS.map((item, i) =>
+            "type" in item && item.type === "divider" ? (
+              <hr key={`div-${i}`} className="border-border my-2" />
+            ) : (
+              <a
+                key={"href" in item ? item.href : i}
+                href={"href" in item ? item.href : "#"}
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-text-secondary hover:text-text hover:bg-surface-light transition-colors"
+              >
+                <span>{"label" in item ? item.label : ""}</span>
+              </a>
+            )
+          )}
         </nav>
 
         <hr className="border-border mx-3" />

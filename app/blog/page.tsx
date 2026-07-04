@@ -1,5 +1,6 @@
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import AdBanner from "@/components/AdBanner";
 
 const POSTS = [
   {
@@ -148,6 +149,9 @@ export default function BlogPage() {
                 </div>
               </div>
             ))}
+          </div>
+          <div className="mt-8">
+            <AdBanner slot="blog-banner" format="horizontal" />
           </div>
         </section>
       </main>

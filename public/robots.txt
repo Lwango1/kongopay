@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://kongopay.vercel.app/sitemap.xml
