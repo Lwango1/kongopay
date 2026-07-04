@@ -3,20 +3,17 @@ const FOOTER_SECTIONS = [
     title: "Plateforme",
     links: [
       { label: "Marchés", href: "/" },
-      { label: "Acheter des Cryptos", href: "/" },
       { label: "Trading P2P", href: "/p2p" },
-      { label: "Convertisseur", href: "/portefeuille" },
-      { label: "Frais", href: "/frais" },
-      { label: "Performance", href: "/performance" },
+      { label: "Portefeuille", href: "/portefeuille" },
       { label: "Signaux Trading", href: "/signaux" },
+      { label: "Abonnement", href: "/abonnement" },
     ],
   },
   {
     title: "Apprendre",
     links: [
       { label: "Guides Crypto", href: "/apprendre" },
-      { label: "Blog & Actualités", href: "/blog" },
-      { label: "Glossaire", href: "/apprendre" },
+      { label: "Calendrier Économique", href: "/signaux" },
       { label: "Sécurité", href: "/apprendre" },
       { label: "Tutoriels", href: "/apprendre" },
     ],

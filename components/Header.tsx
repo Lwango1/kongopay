@@ -7,13 +7,10 @@ import { useRouter } from "next/navigation";
 
 const NAV_ITEMS: ({ label: string; href: string } | { type: "divider" })[] = [
   { label: "Accueil", href: "/" },
-  { label: "Récompenses", href: "/recompenses" },
-  { label: "Abonnement", href: "/abonnement" },
+  { label: "Signaux", href: "/signaux" },
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
-  { label: "Performance", href: "/performance" },
-  { label: "Signaux", href: "/signaux" },
-  { label: "Blog", href: "/blog" },
+  { label: "Abonnement", href: "/abonnement" },
   { label: "Apprendre", href: "/apprendre" },
   { label: "À propos", href: "/a-propos" },
   { type: "divider" as const },
