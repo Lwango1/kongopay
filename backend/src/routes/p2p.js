@@ -26,7 +26,8 @@ router.get('/offers', async (req, res, next) => {
 
 router.post('/offers', authenticate, validateP2POffer, async (req, res, next) => {
   try {
-    const offer = await p2pService.createOffer({ userId: req.user.uid, ...req.body });
+    const { whatsapp, telegram } = req.body;
+    const offer = await p2pService.createOffer({ userId: req.user.uid, ...req.body, whatsapp, telegram });
     res.status(201).json(offer);
   } catch (err) {
     next(err);

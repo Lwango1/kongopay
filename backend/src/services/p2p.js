@@ -9,7 +9,12 @@ const CHATS_COLLECTION = 'p2p_chats';
 const ADMIN_UID = process.env.P2P_ADMIN_UID || '';
 
 export class P2PService {
-  async createOffer({ userId, type, crypto, fiatAmount, cryptoAmount, pricePerUnit, paymentMethod, minAmount, maxAmount }) {
+  async createOffer({ userId, type, crypto, fiatAmount, cryptoAmount, pricePerUnit, paymentMethod, minAmount, maxAmount, whatsapp, telegram }) {
+    const { subscriptionService } = await import('./subscription.js');
+    const canCreate = await subscriptionService.canCreateP2POffer(userId);
+    if (!canCreate.allowed) {
+      throw Object.assign(new Error(`Limite d\'annonces gratuites atteinte (${canCreate.max} max). Passez Premium pour des annonces illimitées.`), { status: 403 });
+    }
     const id = uuidv4().slice(0, 8).toUpperCase();
     const offer = {
       id: `P2P-${id}`,
@@ -22,6 +27,8 @@ export class P2PService {
       paymentMethod,
       minAmount: minAmount || fiatAmount * 0.1,
       maxAmount: maxAmount || fiatAmount,
+      whatsapp: whatsapp || '',
+      telegram: telegram || '',
       status: 'active',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

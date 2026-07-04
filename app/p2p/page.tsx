@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/lib/api";
+import { cdfToUsdt, formatUsdt } from "@/lib/rates";
 import Link from "next/link";
 
 interface P2POffer {
@@ -19,6 +20,8 @@ interface P2POffer {
   paymentMethod: string;
   minAmount: number;
   maxAmount: number;
+  whatsapp: string;
+  telegram: string;
   status: string;
   createdAt: string;
 }
@@ -43,8 +46,9 @@ export default function P2PPage() {
   const [formMethod, setFormMethod] = useState("Airtel Money");
   const [formMin, setFormMin] = useState("");
   const [formMax, setFormMax] = useState("");
-
-  const [startingChat, setStartingChat] = useState<string | null>(null);
+  const [formWhatsapp, setFormWhatsapp] = useState("");
+  const [formTelegram, setFormTelegram] = useState("");
+  const [offerLimit, setOfferLimit] = useState<{ plan: string; remaining: number; max: number } | null>(null);
 
   const fetchOffers = async () => {
     setLoading(true);
@@ -75,7 +79,12 @@ export default function P2PPage() {
   }, [filterType, filterCrypto]);
 
   useEffect(() => {
-    if (user) fetchMyOffers();
+    if (user) {
+      fetchMyOffers();
+      apiFetch<{ plan: string; remaining: number; max: number }>("/subscription/p2p-usage")
+        .then(setOfferLimit)
+        .catch(() => {});
+    }
   }, [user]);
 
   const handleCreateOffer = async (e: React.FormEvent) => {
@@ -93,11 +102,15 @@ export default function P2PPage() {
           paymentMethod: formMethod,
           minAmount: formMin ? parseFloat(formMin) : null,
           maxAmount: formMax ? parseFloat(formMax) : null,
+          whatsapp: formWhatsapp || null,
+          telegram: formTelegram || null,
         }),
       });
       setShowForm(false);
       setFormFiat("");
       setFormPrice("");
+      setFormWhatsapp("");
+      setFormTelegram("");
       fetchOffers();
       fetchMyOffers();
     } catch (err: any) {
@@ -112,21 +125,6 @@ export default function P2PPage() {
       fetchOffers();
     } catch (err: any) {
       setError(err.message);
-    }
-  };
-
-  const handleStartChat = async (offerId: string) => {
-    setStartingChat(offerId);
-    setError("");
-    try {
-      const chat = await apiFetch<{ id: string }>("/p2p/chats", {
-        method: "POST",
-        body: JSON.stringify({ offerId }),
-      });
-      window.location.href = `/p2p/conversations/${chat.id}`;
-    } catch (err: any) {
-      setError(err.message);
-      setStartingChat(null);
     }
   };
 
@@ -174,6 +172,21 @@ export default function P2PPage() {
           {error && (
             <div className="mb-6 p-4 rounded-xl border border-danger/30 bg-danger/10 text-danger text-sm">
               {error}
+            </div>
+          )}
+
+          {user && offerLimit && (
+            <div className="mb-6 px-4 py-2.5 rounded-xl bg-surface border border-border text-sm flex items-center justify-between">
+              <span className="text-text-secondary">
+                {offerLimit.plan === "premium"
+                  ? "Abonnement Premium : annonces illimitées"
+                  : `Annonces gratuites : ${offerLimit.remaining} / ${offerLimit.max} restantes`}
+              </span>
+              {offerLimit.plan !== "premium" && (
+                <a href="/abonnement" className="text-primary hover:underline text-xs font-medium">
+                  Passer Premium
+                </a>
+              )}
             </div>
           )}
 
@@ -233,6 +246,18 @@ export default function P2PPage() {
                       className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono text-text outline-none focus:border-primary"
                       placeholder={formFiat || "500000"} />
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted mb-1 block">WhatsApp (pour contact direct)</label>
+                  <input type="text" value={formWhatsapp} onChange={(e) => setFormWhatsapp(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text outline-none focus:border-primary"
+                    placeholder="+243XXXXXXXXX" />
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted mb-1 block">Telegram (pseudo)</label>
+                  <input type="text" value={formTelegram} onChange={(e) => setFormTelegram(e.target.value)}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-text outline-none focus:border-primary"
+                    placeholder="@username" />
                 </div>
                 <div className="sm:col-span-2 lg:col-span-3">
                   <button type="submit"
@@ -294,7 +319,10 @@ export default function P2PPage() {
                     </div>
                     <div className="text-right">
                       <div className="font-bold font-mono">{offer.fiatAmount.toLocaleString()} CDF</div>
-                      <div className="text-xs text-text-muted">
+                      <div className="text-[10px] text-text-muted">
+                        ≈ {formatUsdt(cdfToUsdt(offer.fiatAmount))}
+                      </div>
+                      <div className="text-xs text-text-muted mt-0.5">
                         {offer.cryptoAmount.toFixed(4)} {offer.crypto} à {offer.pricePerUnit.toLocaleString()} CDF
                       </div>
                     </div>
@@ -313,13 +341,26 @@ export default function P2PPage() {
                   </div>
 
                   {user && offer.userId !== user.uid && offer.status === "active" && (
-                    <div className="mt-3 pt-3 border-t border-border">
-                      <button onClick={() => handleStartChat(offer.id)}
-                        disabled={startingChat === offer.id}
-                        className="w-full py-2 rounded-lg border border-primary/30 text-primary hover:bg-primary/5 transition-colors text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50">
-                        <MessageCircle size={16} />
-                        {startingChat === offer.id ? "Ouverture..." : "Discuter"}
-                      </button>
+                    <div className="mt-3 pt-3 border-t border-border flex gap-2">
+                      {offer.whatsapp ? (
+                        <a href={`https://wa.me/${offer.whatsapp.replace(/[^0-9]/g, '')}?text=Bonjour%2C%20je%20suis%20int%C3%A9ress%C3%A9%20par%20votre%20annonce%20${offer.id}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex-1 py-2 rounded-lg bg-[#25D366] text-white hover:bg-[#20BD5A] transition-colors text-sm font-medium flex items-center justify-center gap-1.5">
+                          <MessageCircle size={16} /> WhatsApp
+                        </a>
+                      ) : null}
+                      {offer.telegram ? (
+                        <a href={`https://t.me/${offer.telegram.replace('@', '')}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="flex-1 py-2 rounded-lg bg-[#0088cc] text-white hover:bg-[#0077b5] transition-colors text-sm font-medium flex items-center justify-center gap-1.5">
+                          <MessageCircle size={16} /> Telegram
+                        </a>
+                      ) : null}
+                      {!offer.whatsapp && !offer.telegram && (
+                        <span className="w-full py-2 rounded-lg border border-border text-text-muted text-sm text-center">
+                          Aucun contact disponible
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

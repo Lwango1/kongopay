@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 const NAV_ITEMS = [
   { label: "Accueil", href: "/" },
   { label: "Récompenses", href: "/recompenses" },
+  { label: "Abonnement", href: "/abonnement" },
   { label: "P2P", href: "/p2p" },
   { label: "Portefeuille", href: "/portefeuille" },
   { label: "Performance", href: "/performance" },

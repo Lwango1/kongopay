@@ -35,5 +35,7 @@ export const validateP2POffer = [
   body('fiatAmount').isFloat({ min: 1000 }).withMessage('Montant minimum 1 000 CDF'),
   body('pricePerUnit').isFloat({ min: 1 }).withMessage('Prix unitaire invalide'),
   body('paymentMethod').notEmpty().withMessage('Méthode de paiement requise'),
+  body('whatsapp').optional({ values: 'falsy' }).matches(/^\+?\d{7,15}$/).withMessage('Numéro WhatsApp invalide'),
+  body('telegram').optional({ values: 'falsy' }).isString().trim().isLength({ min: 3 }).withMessage('Pseudo Telegram invalide'),
   handleValidation,
 ];

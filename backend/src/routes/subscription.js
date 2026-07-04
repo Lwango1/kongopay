@@ -7,11 +7,25 @@ const router = Router();
 router.get('/status', authenticate, async (req, res, next) => {
   try {
     const status = await subscriptionService.getStatus(req.user.uid);
-    res.json({
-      isPremium: status.isPremium,
-      premiumUntil: status.premiumUntil,
-      trialEndsAt: status.trialEndsAt,
-    });
+    res.json(status);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/plans', async (req, res, next) => {
+  try {
+    const plans = await subscriptionService.getPlans();
+    res.json(plans);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/subscribe', authenticate, async (req, res, next) => {
+  try {
+    const result = await subscriptionService.subscribeWithWallet(req.user.uid);
+    res.json(result);
   } catch (err) {
     next(err);
   }
@@ -35,12 +49,22 @@ router.get('/signal-usage', authenticate, async (req, res, next) => {
   }
 });
 
-router.get('/config', (req, res) => {
-  res.json({
-    freeSignalsPerDay: 4,
-    premiumPriceMonthly: 10,
-    premiumPriceCurrency: 'USD',
-  });
+router.get('/p2p-usage', authenticate, async (req, res, next) => {
+  try {
+    const usage = await subscriptionService.getP2POfferUsage(req.user.uid);
+    res.json(usage);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/can-create-offer', authenticate, async (req, res, next) => {
+  try {
+    const result = await subscriptionService.canCreateP2POffer(req.user.uid);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.post('/set-premium', authenticate, requireAdmin, async (req, res, next) => {
