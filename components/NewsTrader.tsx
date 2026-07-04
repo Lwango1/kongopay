@@ -161,20 +161,14 @@ export default function NewsTrader() {
           <div className="flex items-center gap-3 mb-1">
             <Newspaper size={24} className="text-primary" />
             <h2 className="text-2xl font-bold">News Trading</h2>
-            {source === "finnhub" ? (
+            {source === "finnhub" && (
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold animate-pulse">
                 ● EN DIRECT
               </span>
-            ) : source === "simulated" ? (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-warning/20 text-warning font-semibold">
-                SIMULÉ
-              </span>
-            ) : null}
+            )}
           </div>
           <p className="text-text-secondary text-sm">
-            {source === "finnhub"
-              ? "Données en temps réel depuis Finnhub."
-              : "Anticipez les mouvements du marché avant les annonces économiques majeures."}
+            Anticipez les mouvements du marché avant les annonces économiques majeures.
           </p>
         </div>
         <button onClick={fetchData} disabled={loading}
@@ -189,11 +183,19 @@ export default function NewsTrader() {
         </div>
       )}
 
-      {!loading && !data && (
+      {!loading && (!data || (data.events.length === 0 && data.source === "finnhub")) && (
         <div className="rounded-xl border border-border bg-surface p-12 text-center">
           <BarChart3 size={40} className="mx-auto text-text-muted mb-3" />
-          <p className="text-text-muted mb-1">Aucune donnée économique disponible</p>
-          <p className="text-xs text-text-secondary">Revenez plus tard ou vérifiez votre connexion.</p>
+          <p className="text-text-muted mb-1">Aucune annonce économique aujourd'hui</p>
+          <p className="text-xs text-text-secondary">Le calendrier Finnhub ne contient pas d'événements pour aujourd'hui.</p>
+        </div>
+      )}
+
+      {!loading && data && data.source === "error" && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 p-12 text-center">
+          <AlertTriangle size={40} className="mx-auto text-danger mb-3" />
+          <p className="text-danger font-medium mb-1">Service indisponible</p>
+          <p className="text-xs text-text-secondary">Impossible de contacter Finnhub. Réessaie plus tard.</p>
         </div>
       )}
 
