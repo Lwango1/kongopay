@@ -464,7 +464,7 @@ export default function SignauxPage() {
             )}
 
             <div className="mt-8">
-              <AdBanner />
+              <AdBanner slot="signaux-bottom" />
             </div>
 
             {/* Explication du système */}
@@ -514,7 +514,7 @@ export default function SignauxPage() {
           <>
             <NewsTrader />
             <div className="mt-8">
-              <AdBanner />
+              <AdBanner slot="signaux-news" />
             </div>
           </>
         )}
