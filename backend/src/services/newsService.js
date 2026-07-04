@@ -1,5 +1,5 @@
 // Service de news économiques en temps réel
-// Sources: investing.com API, forexfactory, avec fallback données simulées
+// Sources: Finnhub API, investing.com HTML, forexfactory HTML
 
 import fetch from 'node-fetch';
 
@@ -170,115 +170,6 @@ function parseForexFactoryHtml(html) {
   return events;
 }
 
-// Fallback: données simulées réalistes basées sur le calendrier réel
-function generateRealisticMock() {
-  const now = new Date();
-  const dayOfWeek = now.getDay();
-  const events = [];
-
-  // Événements récurrents hebdomadaires
-  const weeklyEvents = [
-    { day: 1, hour: 14, title: 'États-Unis — Ventes de logements', country: 'US', currency: 'USD', impact: 'medium' },
-    { day: 2, hour: 8, title: 'Zone Euro — PIB trimestriel', country: 'EU', currency: 'EUR', impact: 'high' },
-    { day: 2, hour: 14, title: 'États-Unis — Confiance des consommateurs', country: 'US', currency: 'USD', impact: 'medium' },
-    { day: 3, hour: 8, title: 'Allemagne — Taux de chômage', country: 'DE', currency: 'EUR', impact: 'high' },
-    { day: 3, hour: 13, title: 'États-Unis — IPC mensuel', country: 'US', currency: 'USD', impact: 'high' },
-    { day: 4, hour: 13, title: 'États-Unis — PIB (estimé)', country: 'US', currency: 'USD', impact: 'high' },
-    { day: 4, hour: 14, title: 'États-Unis — Demande d\'allocations chômage', country: 'US', currency: 'USD', impact: 'medium' },
-    { day: 5, hour: 8, title: 'France — Production industrielle', country: 'FR', currency: 'EUR', impact: 'medium' },
-    { day: 5, hour: 13, title: 'États-Unis — Ventes au détail', country: 'US', currency: 'USD', impact: 'high' },
-  ];
-
-  const currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'];
-  const countries = ['US', 'EU', 'UK', 'JP', 'CH', 'CA', 'AU', 'NZ'];
-  const countryNames = ['États-Unis', 'Zone Euro', 'Royaume-Uni', 'Japon', 'Suisse', 'Canada', 'Australie', 'Nouvelle-Zélande'];
-
-  const impactLevels = ['high', 'medium', 'low'];
-  const eventTemplates = [
-    'Décision taux directeur',
-    'Indice des prix à la consommation',
-    'Ventes au détail',
-    'Production industrielle',
-    'Taux de chômage',
-    'Indice PMI manufacturier',
-    'Balance commerciale',
-    'Confiance des consommateurs',
-    'Commandes de biens durables',
-    'Mise en chantier',
-  ];
-
-  // Add weekly recurring events
-  for (const we of weeklyEvents) {
-    if (we.day === dayOfWeek) {
-      const eventDate = new Date(now);
-      eventDate.setHours(we.hour, 30, 0, 0);
-      if (eventDate > now) {
-        const prevVal = (Math.random() * 6 - 2).toFixed(1);
-        const forecastVal = (parseFloat(prevVal) + (Math.random() - 0.5) * 0.8).toFixed(1);
-        events.push({
-          id: `ECON-${eventDate.toISOString().slice(0, 10)}-${we.title.slice(0, 3)}`,
-          date: eventDate.toISOString().slice(0, 10),
-          time: `${we.hour.toString().padStart(2, '0')}:30`,
-          title: we.title,
-          country: we.country,
-          currency: we.currency,
-          impact: we.impact,
-          previous: `${prevVal}%`,
-          forecast: `${forecastVal}%`,
-          actual: null,
-          status: 'upcoming',
-        });
-      }
-    }
-  }
-
-  // Add extra random events for today and next 3 days
-  for (let d = 0; d < 4; d++) {
-    const date = new Date(now);
-    date.setDate(date.getDate() + d);
-    const dateStr = date.toISOString().slice(0, 10);
-    const numExtra = d === 0 ? 2 + Math.floor(Math.random() * 3) : 3 + Math.floor(Math.random() * 3);
-
-    for (let i = 0; i < numExtra; i++) {
-      const ci = Math.floor(Math.random() * countries.length);
-      const ti = Math.floor(Math.random() * eventTemplates.length);
-      const ii = Math.random() < 0.3 ? 0 : Math.random() < 0.6 ? 1 : 2;
-      const hour = 7 + Math.floor(Math.random() * 12);
-      const minute = Math.random() > 0.5 ? 0 : 30;
-
-      const eventDate = new Date(date);
-      eventDate.setHours(hour, minute, 0, 0);
-      const isPast = eventDate < now;
-
-      const prevVal = (Math.random() * 8 - 3).toFixed(1);
-      const forecastVal = (parseFloat(prevVal) + (Math.random() - 0.5) * 1.0).toFixed(1);
-      const actualDiff = (Math.random() - 0.5) * 1.5;
-
-      events.push({
-        id: `ECON-${dateStr}-${ci}-${i}`,
-        date: dateStr,
-        time: `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`,
-        title: `${countryNames[ci]} — ${eventTemplates[ti]}`,
-        country: countries[ci],
-        currency: currencies[ci],
-        impact: impactLevels[ii],
-        previous: `${prevVal}%`,
-        forecast: `${forecastVal}%`,
-        actual: isPast ? `${(parseFloat(forecastVal) + actualDiff).toFixed(1)}%` : null,
-        status: isPast ? 'done' : 'upcoming',
-      });
-    }
-  }
-
-  // Sort by date/time
-  events.sort((a, b) => {
-    if (a.date !== b.date) return a.date.localeCompare(b.date);
-    return a.time.localeCompare(b.time);
-  });
-
-  return events;
-}
-
 // Analyse d'impact pour un événement
 function analyzeEvent(event) {
   const parsePct = (s) => parseFloat(String(s).replace('%', '').replace('+', '')) || 0;
@@ -376,10 +267,10 @@ export async function getEconomicCalendar() {
     }
   }
 
-  // 3. Fallback to realistic mock
+  // 3. No fallback — return empty if all real sources failed
   if (events.length < 5) {
-    events = generateRealisticMock();
-    source = 'mock';
+    events = [];
+    source = 'empty';
   }
 
   // Prix réels depuis Deriv (ou fallback hardcodé)
