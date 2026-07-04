@@ -12,10 +12,9 @@ const FOOTER_SECTIONS = [
   {
     title: "Apprendre",
     links: [
-      { label: "Guides Crypto", href: "/apprendre" },
+      { label: "Signaux Trading", href: "/signaux" },
       { label: "Calendrier Économique", href: "/signaux" },
-      { label: "Sécurité", href: "/apprendre" },
-      { label: "Tutoriels", href: "/apprendre" },
+      { label: "Guide P2P", href: "/p2p" },
     ],
   },
   {
