@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Menu, X, LogOut, User } from "lucide-react";
+import { Menu, X, LogOut, User, Shield } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 
@@ -23,7 +23,7 @@ const NAV_ITEMS: ({ label: string; href: string } | { type: "divider" })[] = [
 
 export default function Header() {
   const [open, setOpen] = useState(false);
-  const { user, logout, loading } = useAuth();
+  const { user, logout, loading, isAdmin } = useAuth();
   const router = useRouter();
 
   const handleLogout = async () => {
@@ -88,6 +88,14 @@ export default function Header() {
                 <User size={16} />
                 <span className="truncate max-w-[140px]">{user.displayName || user.email}</span>
               </a>
+              {isAdmin && (
+                <a href="/admin" onClick={() => setOpen(false)}
+                  className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-warning hover:text-warning/80 hover:bg-surface-light transition-colors"
+                >
+                  <Shield size={16} />
+                  <span>Admin</span>
+                </a>
+              )}
               <button onClick={() => { handleLogout(); setOpen(false); }}
                 className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-danger hover:text-danger/80 hover:bg-surface-light transition-colors"
               >

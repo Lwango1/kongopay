@@ -1,7 +1,16 @@
 import { Router } from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireAdmin } from '../middleware/auth.js';
 import { p2pService } from '../services/p2p.js';
 import { validateP2POffer } from '../utils/validators.js';
+import { auth } from '../config/firebase.js';
+
+async function checkIsAdmin(uid) {
+  try {
+    const user = await auth.getUser(uid);
+    const claims = user.customClaims || {};
+    return !!claims.admin;
+  } catch { return false; }
+}
 
 const router = Router();
 
@@ -70,7 +79,7 @@ router.post('/trades', authenticate, async (req, res, next) => {
 
 router.get('/trades', authenticate, async (req, res, next) => {
   try {
-    const isAdmin = req.user.uid === process.env.P2P_ADMIN_UID;
+    const isAdmin = req.user.uid === process.env.P2P_ADMIN_UID || await checkIsAdmin(req.user.uid);
     const trades = isAdmin ? await p2pService.getAllTrades() : await p2pService.getUserTrades(req.user.uid);
     res.json(trades);
   } catch (err) {
@@ -167,7 +176,7 @@ router.post('/chats', authenticate, async (req, res, next) => {
 
 router.get('/chats', authenticate, async (req, res, next) => {
   try {
-    const isAdmin = req.user.uid === process.env.P2P_ADMIN_UID;
+    const isAdmin = req.user.uid === process.env.P2P_ADMIN_UID || await checkIsAdmin(req.user.uid);
     const chats = isAdmin
       ? await p2pService.getAdminChats(req.user.uid)
       : await p2pService.getUserChats(req.user.uid);

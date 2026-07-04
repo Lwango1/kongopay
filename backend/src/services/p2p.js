@@ -8,6 +8,17 @@ const CHATS_COLLECTION = 'p2p_chats';
 
 const ADMIN_UID = process.env.P2P_ADMIN_UID || '';
 
+async function isFirebaseAdmin(uid) {
+  try {
+    const { auth } = await import('../config/firebase.js');
+    const user = await auth.getUser(uid);
+    const claims = user.customClaims || {};
+    return !!claims.admin;
+  } catch {
+    return false;
+  }
+}
+
 export class P2PService {
   async createOffer({ userId, type, crypto, fiatAmount, cryptoAmount, pricePerUnit, paymentMethod, minAmount, maxAmount, whatsapp, telegram }) {
     const { subscriptionService } = await import('./subscription.js');
@@ -205,7 +216,8 @@ export class P2PService {
   }
 
   async releaseFunds(tradeId, adminId) {
-    if (adminId !== ADMIN_UID) throw Object.assign(new Error('Non autorisé'), { status: 403 });
+    const isAdmin = adminId === ADMIN_UID || await isFirebaseAdmin(adminId);
+    if (!isAdmin) throw Object.assign(new Error('Non autorisé'), { status: 403 });
 
     const trade = await this.getTrade(tradeId);
     if (trade.status !== 'paid') throw Object.assign(new Error('Le paiement n\'a pas encore été confirmé'), { status: 400 });
