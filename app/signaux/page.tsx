@@ -87,7 +87,6 @@ export default function SignauxPage() {
   const [waitingData, setWaitingData] = useState(true);
   const [expandedOpportunity, setExpandedOpportunity] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<"indices" | "news">("indices");
-  const [selectedIndex, setSelectedIndex] = useState<{ type: "BOOM" | "CRASH"; number: number } | null>(null);
 
   const previousImminentRef = useState<string[]>([])[0];
   const audioCtxRef = useState<AudioContext | null>(null)[0];
@@ -295,7 +294,6 @@ export default function SignauxPage() {
                         <th className="text-right px-4 py-3 font-semibold">Direction</th>
                         <th className="text-right px-4 py-3 font-semibold">Ampleur</th>
                         <th className="text-right px-4 py-3 font-semibold">Dernier spike</th>
-                        <th className="text-center px-4 py-3 font-semibold">Graphique</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -349,12 +347,6 @@ export default function SignauxPage() {
                             <td className={`px-4 py-3 text-right font-semibold capitalize ${opp.expectedDirection === "up" ? "text-success" : "text-danger"}`}>{opp.expectedDirection === "up" ? "Hausse ↗" : "Baisse ↘"}</td>
                             <td className="px-4 py-3 text-right font-mono text-xs text-text-secondary">{opp.estimatedMagnitude}</td>
                             <td className="px-4 py-3 text-right text-xs text-text-secondary">{opp.timeSinceLastSpike > 60 ? `${Math.round(opp.timeSinceLastSpike / 60)}m` : `${opp.timeSinceLastSpike}s`}</td>
-                            <td className="px-4 py-3 text-center">
-                              <button onClick={() => setSelectedIndex(selectedIndex?.type === opp.type && selectedIndex?.number === opp.number ? null : { type: opp.type, number: opp.number })}
-                                className={`text-[10px] px-2 py-1 rounded font-medium transition ${selectedIndex?.type === opp.type && selectedIndex?.number === opp.number ? "bg-primary text-white" : "bg-surface border border-border text-text-secondary hover:text-text"}`}>
-                                {selectedIndex?.type === opp.type && selectedIndex?.number === opp.number ? "Fermer" : "Chart"}
-                              </button>
-                            </td>
                           </tr>
                         );
                       })}
@@ -442,11 +434,9 @@ export default function SignauxPage() {
             )}
 
             {/* Chart */}
-            {selectedIndex && (
-              <div className="mb-8">
-                <DerivChart type={selectedIndex.type} number={selectedIndex.number} />
-              </div>
-            )}
+            <div className="mb-8" id="chart">
+              <DerivChart />
+            </div>
 
             {/* Alert History */}
             {alertHistory.length > 0 && (
