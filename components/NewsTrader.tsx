@@ -192,34 +192,16 @@ function PairCard({ pair }: { pair: PairAnalysis }) {
         </div>
       )}
 
-      {/* SMC/ICT badges */}
-      <div className="flex flex-wrap gap-1 mb-1">
-        {pair.fvg && !pair.fvg.mitigated && (
-          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${pair.fvg.type === "bullish" ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
-            FVG {pair.fvg.type === "bullish" ? "+" : "-"}
-          </span>
-        )}
-        {pair.ote && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-primary/10 text-primary border border-primary/20">
-            OTE
-          </span>
-        )}
-        {pair.pdArray && (
-          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${pair.pdArray.zone === "premium" ? "bg-danger/10 text-danger border border-danger/20" : "bg-success/10 text-success border border-success/20"}`}>
-            {pair.pdArray.zone === "premium" ? "Premium" : "Discount"}
-          </span>
-        )}
-        {pair.displacement && (
-          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-warning/10 text-warning border border-warning/20">
-            Disp {pair.displacement.direction === "bullish" ? "↑" : "↓"} x{pair.displacement.ratio}
-          </span>
-        )}
-        {pair.candlePatterns.map((p, i) => (
-          <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${p.signal === "bullish" ? "bg-success/10 text-success border border-success/20" : p.signal === "bearish" ? "bg-danger/10 text-danger border border-danger/20" : "bg-surface-light text-text-muted border border-border"}`}>
-            {p.name}
-          </span>
-        ))}
-      </div>
+      {/* S/R Levels */}
+      {pair.sRlevels && pair.sRlevels.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-1">
+          {pair.sRlevels.slice(0, 3).map((l, i) => (
+            <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${l.type === "support" ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
+              {l.type === "support" ? "S" : "R"}{l.strength} @ {formatPrice(l.price, pair.pair)}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Scores */}
       <div className="flex items-center gap-3 text-[10px] text-text-muted">
@@ -284,13 +266,13 @@ export default function NewsTrader() {
         <div>
           <div className="flex items-center gap-3 mb-1">
             <Target size={24} className="text-primary" />
-            <h2 className="text-2xl font-bold">SMC / ICT Analysis</h2>
+            <h2 className="text-2xl font-bold">Analyse S/R Niveaux</h2>
             {data?.connected === true && (
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold animate-pulse">● EN DIRECT</span>
             )}
           </div>
           <p className="text-text-secondary text-sm">
-            Fair Value Gaps · Optimal Trade Entry · Premium/Discount · SMT Divergence · Order Blocks
+            Supports · Résistances · Proximité · Force des niveaux · Rupture
             {data?.killzone && <span className="ml-2 text-primary">· {data.killzone}</span>}
           </p>
         </div>
@@ -386,37 +368,37 @@ export default function NewsTrader() {
           {filter === "signals" && signalCount === 0 && data.pairs.length > 0 && (
             <div className="mt-6 p-6 rounded-xl border border-border bg-surface text-center text-sm text-text-secondary">
               <Crosshair size={24} className="mx-auto mb-2 text-text-muted" />
-              Aucun信号 de retournement détecté pour le moment. Le scan surveille les 8 paires en continu avec les concepts SMC/ICT.
+              Aucun signal de retournement détecté pour le moment. Le scan surveille les 8 paires en continu avec les niveaux S/R.
             </div>
           )}
 
-          {/* SMC/ICT legend */}
+          {/* S/R legend */}
           <div className="mt-8 rounded-xl border border-border bg-surface p-6">
-            <h3 className="font-bold text-lg mb-4">Concepts SMC / ICT utilisés</h3>
+            <h3 className="font-bold text-lg mb-4">Analyse par Niveaux S/R</h3>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
               <div>
-                <h4 className="font-semibold text-primary mb-1">Fair Value Gap (FVG)</h4>
-                <p className="text-text-secondary text-xs">Écart de prix entre 3 bougies consécutives. Non comblé = zone d&apos;intérêt pour un retournement.</p>
+                <h4 className="font-semibold text-primary mb-1">Support</h4>
+                <p className="text-text-secondary text-xs">Niveau de prix où la pression acheteuse est suffisante pour stopper la baisse. Le prix a rebondi plusieurs fois à ce niveau.</p>
               </div>
               <div>
-                <h4 className="font-semibold text-primary mb-1">Optimal Trade Entry (OTE)</h4>
-                <p className="text-text-secondary text-xs">Zone Fibonacci 0.618-0.79. Le prix qui retrace dans cette zone offre le meilleur ratio risque/rendement.</p>
+                <h4 className="font-semibold text-primary mb-1">Résistance</h4>
+                <p className="text-text-secondary text-xs">Niveau de prix où la pression vendeuse empêche la hausse. Plus le niveau est fort, plus le rejet est probable.</p>
               </div>
               <div>
-                <h4 className="font-semibold text-primary mb-1">Premium / Discount</h4>
-                <p className="text-text-secondary text-xs">La zone au-dessus de 50% de la range = Premium (vendre), en dessous = Discount (acheter).</p>
+                <h4 className="font-semibold text-primary mb-1">Proximité</h4>
+                <p className="text-text-secondary text-xs">Le prix doit être à moins de 0.3% du niveau S/R pour générer un signal. Plus le niveau est proche, plus la probabilité est élevée.</p>
               </div>
               <div>
-                <h4 className="font-semibold text-primary mb-1">SMT Divergence</h4>
-                <p className="text-text-secondary text-xs">Divergence entre paires corrélées (EUR/USD vs USD/CHF, GBP/USD vs USD/JPY). Signale un retournement imminent.</p>
+                <h4 className="font-semibold text-primary mb-1">Force du niveau</h4>
+                <p className="text-text-secondary text-xs">Basée sur le nombre de pivots de prix au même niveau multiple fois (strength 1-10). Minimum strength 3 pour un signal fiable.</p>
               </div>
               <div>
-                <h4 className="font-semibold text-primary mb-1">Displacement</h4>
-                <p className="text-text-secondary text-xs">Bougie agressive avec un corps 2x plus grand que la moyenne. Montre l&apos;intention des institutionnels.</p>
+                <h4 className="font-semibold text-primary mb-1">Touché & Approche</h4>
+                <p className="text-text-secondary text-xs">Le prix ayant déjà touché le niveau dans les 40 derniers ticks + mouvement actuel vers le niveau = signal renforcé.</p>
               </div>
               <div>
-                <h4 className="font-semibold text-primary mb-1">Order Blocks + S/R</h4>
-                <p className="text-text-secondary text-xs">Blocs d&apos;ordres institutionnels avec clustering de pivots S/R. Confluence multi-timeframe (15m, 30m, 1h, 2h).</p>
+                <h4 className="font-semibold text-primary mb-1">SL / TP</h4>
+                <p className="text-text-secondary text-xs">Stop Loss placé au-delà du niveau S/R. Take Profit à 2x la distance SL pour un ratio risque/rendement de 1:2.</p>
               </div>
             </div>
           </div>
