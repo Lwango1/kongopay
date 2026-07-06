@@ -38,6 +38,8 @@ class ForexAnalysisService {
     this.ws = null;
     this.connected = false;
     this.cache = { data: null, timestamp: 0 };
+    this.directionMemory = new Map(); // key -> { history: string[], lockedUntil: number }
+    this.broadcastedSignals = new Set();
 
     for (const { symbol } of FOREX_SYMBOLS) {
       const key = buildCandleKey(symbol);
@@ -46,7 +48,32 @@ class ForexAnalysisService {
         m15: [], m30: [], h1: [], h2: [],
       });
       this.prices.set(key, { price: 0, bid: 0, ask: 0, timestamp: 0 });
+      this.directionMemory.set(key, { history: [], lockedUntil: 0 });
     }
+  }
+
+  _getStableDirection(key, proposedUp) {
+    const mem = this.directionMemory.get(key);
+    if (!mem) return proposedUp;
+    const now = Date.now();
+
+    if (now < mem.lockedUntil) {
+      const prev = mem.history[mem.history.length - 1];
+      if (prev !== undefined) return prev;
+    }
+
+    mem.history.push(proposedUp ? 'up' : 'down');
+    if (mem.history.length > 3) mem.history.shift();
+
+    const upCount = mem.history.filter(d => d === 'up').length;
+    const majorityUp = upCount >= 2;
+    const prev = mem.history[mem.history.length - 2];
+
+    if (prev !== undefined && prev !== (majorityUp ? 'up' : 'down')) {
+      mem.lockedUntil = now + 120000;
+    }
+
+    return majorityUp;
   }
 
   connect() {
@@ -426,8 +453,9 @@ class ForexAnalysisService {
     upScore = Math.min(Math.max(upScore, 0), 1);
     downScore = Math.min(Math.max(downScore, 0), 1);
 
-    // Determine direction
-    const isUpDirection = upScore >= downScore;
+    // Determine direction (stabilized — prevents flip-flopping)
+    const rawUp = upScore > downScore + 0.03;
+    const isUpDirection = this._getStableDirection(key, rawUp);
     const bestScore = isUpDirection ? upScore : downScore;
     const refLevel = isUpDirection ? upRef : downRef;
     const refStrength = isUpDirection ? upStr : downStr;
