@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { broadcastSignal } from './pushNotifications.js';
-import { calculateRSI, findSupportResistance } from './analysis.js';
+import { calculateRSI, findSupportResistance, findOrderBlocks } from './analysis.js';
 
 const FOREX_SYMBOLS = [
   { symbol: 'frxEURUSD', pair: 'EUR/USD', type: 'forex', group: 'eur' },
@@ -215,6 +215,7 @@ class ForexAnalysisService {
 
     const currentPrice = prices[prices.length - 1];
     const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(prices, currentPrice);
+    const orderBlocks = findOrderBlocks(prices);
 
     const threshold = Math.max(currentPrice * 0.003, 0.0005);
 
@@ -296,6 +297,13 @@ class ForexAnalysisService {
     const levelTouched = stableUp ? supportTouched : resistanceTouched;
     const isApproaching = stableUp ? approachingSupport : approachingResistance;
 
+    // Order block confluence boost
+    const nearOB = orderBlocks.find(ob =>
+      Math.abs(ob.price - currentPrice) / currentPrice < 0.003 &&
+      ((stableUp && ob.type === 'bullish') || (!stableUp && ob.type === 'bearish'))
+    );
+    if (nearOB) probability += 10;
+
     if (levelTouched && refStrength >= 3) probability += 8;
     if (isApproaching && refStrength >= 3) probability += 5;
     probability = Math.min(probability, 95);
@@ -326,7 +334,12 @@ class ForexAnalysisService {
       stopLoss, takeProfit,
       rsi: 50, trend: 'ranging', regime: 'ranging', volatility: 'medium',
       killzone: this.detectKillzone(),
-      fvg: null, ote: null, pdArray: null, displacement: null, orderBlocks: [],
+      fvg: null, ote: null, pdArray: null, displacement: null,
+      orderBlocks: orderBlocks.slice(0, 3).map(ob => ({
+        price: Math.round(ob.price * 10000) / 10000,
+        type: ob.type,
+        strength: ob.strength,
+      })),
       sRlevels: allLevels.slice(0, 6).map(l => ({
         price: Math.round(l.price * 10000) / 10000,
         strength: l.strength, type: l.type,

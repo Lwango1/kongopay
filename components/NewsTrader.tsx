@@ -192,16 +192,19 @@ function PairCard({ pair }: { pair: PairAnalysis }) {
         </div>
       )}
 
-      {/* S/R Levels */}
-      {pair.sRlevels && pair.sRlevels.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-1">
-          {pair.sRlevels.slice(0, 3).map((l, i) => (
-            <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${l.type === "support" ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
-              {l.type === "support" ? "S" : "R"}{l.strength} @ {formatPrice(l.price, pair.pair)}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* S/R Levels + Order Blocks */}
+      <div className="flex flex-wrap gap-1 mb-1">
+        {pair.sRlevels && pair.sRlevels.slice(0, 3).map((l, i) => (
+          <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${l.type === "support" ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
+            {l.type === "support" ? "S" : "R"}{l.strength} @ {formatPrice(l.price, pair.pair)}
+          </span>
+        ))}
+        {pair.orderBlocks && pair.orderBlocks.map((ob, i) => (
+          <span key={`ob-${i}`} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${ob.type === "bullish" ? "bg-primary/10 text-primary border border-primary/20" : "bg-warning/10 text-warning border border-warning/20"}`}>
+            OB {ob.type === "bullish" ? "↑" : "↓"} {formatPrice(ob.price, pair.pair)}
+          </span>
+        ))}
+      </div>
 
       {/* Scores */}
       <div className="flex items-center gap-3 text-[10px] text-text-muted">
