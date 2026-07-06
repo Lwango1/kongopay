@@ -25,7 +25,8 @@ export async function sendSignalNotification(userId, signal) {
     if (signal.type === 'FOREX') {
       const dir = signal.expectedDirection === 'up' ? '📈 HAUSSE' : '📉 BAISSE';
       const title = `KongoPay — ${signal.pair}`;
-      const body = `${dir} ${signal.signal} | ${signal.probability}% | Entry ${signal.entryPrice} | TP ${signal.takeProfit} | SL ${signal.stopLoss}`;
+      const reason = signal.reason ? ` | ${signal.reason}` : '';
+      const body = `${dir} ${signal.signal} ${signal.probability}%${reason} | Entry ${signal.entryPrice} TP ${signal.takeProfit} SL ${signal.stopLoss}`;
       await admin.messaging().send({
         token,
         notification: { title, body },
@@ -35,6 +36,7 @@ export async function sendSignalNotification(userId, signal) {
           expectedDirection: signal.expectedDirection,
           probability: String(signal.probability),
           signal: signal.signal,
+          reason: signal.reason || '',
           entryPrice: String(signal.entryPrice),
           stopLoss: String(signal.stopLoss),
           takeProfit: String(signal.takeProfit),

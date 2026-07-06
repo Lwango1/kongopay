@@ -58,6 +58,7 @@ interface PairAnalysis {
   levelTouched: boolean;
   isApproaching: boolean;
   signal: string;
+  reason: string;
   entryPrice: number;
   stopLoss: number;
   takeProfit: number;
@@ -181,6 +182,9 @@ function PairCard({ pair }: { pair: PairAnalysis }) {
             <span className="block text-[9px] text-danger">-{Math.abs(slDist).toFixed(2)}%</span>
           </div>
         </div>
+      )}
+      {hasSignal && pair.reason && (
+        <p className="text-[10px] text-text-secondary mb-1.5 px-1 leading-relaxed">{pair.reason}</p>
       )}
       {hasSignal && (
         <div className="flex items-center justify-between text-[10px] px-1 mb-1">

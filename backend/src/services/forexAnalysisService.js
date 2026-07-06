@@ -278,7 +278,7 @@ class ForexAnalysisService {
 
     if (noClearSignal || !hasLevel || (upScore < 0.3 && downScore < 0.3)) {
       return {
-        key, currentPrice, probability: 0, expectedDirection: 'up', estimatedMagnitude: '0.0%',
+        key, currentPrice, probability: 0, reason: '', expectedDirection: 'up', estimatedMagnitude: '0.0%',
         isSpikeImminent: false, levelTouched: false, isApproaching: false, signal: 'WATCH',
         entryPrice: Math.round(currentPrice * 10000) / 10000,
         stopLoss: Math.round(currentPrice * 10000) / 10000,
@@ -317,6 +317,17 @@ class ForexAnalysisService {
     const takeProfit = stableUp ? Math.round((currentPrice + slBuffer * 2.4) * 10000) / 10000 : Math.round((currentPrice - slBuffer * 2.4) * 10000) / 10000;
     const magnitudePct = (slBuffer * 2.4 / currentPrice) * 100;
 
+    // Build reason string
+    const parts = [];
+    const levelType = stableUp ? 'Support' : 'Résistance';
+    parts.push(`${levelType} ${refStrength}`);
+    if (levelTouched) parts.push('touché');
+    if (isApproaching) parts.push('en approche');
+    if (nearOB) parts.push(`OB ${nearOB.type === 'bullish' ? '↑' : '↓'} confl.`);
+    parts.push(`${probability}%`);
+    parts.push(`R:R ${((slBuffer * 2.4) / (slBuffer * 1.2)).toFixed(1)}`);
+    const reason = parts.join(' · ');
+
     const strongThreshold = 70;
     const signalThreshold = 55;
     const signal = probability >= strongThreshold
@@ -326,7 +337,7 @@ class ForexAnalysisService {
         : 'WATCH';
 
     return {
-      key, currentPrice, probability,
+      key, currentPrice, probability, reason,
       expectedDirection: stableUp ? 'up' : 'down',
       estimatedMagnitude: `${magnitudePct.toFixed(1)}%`,
       isSpikeImminent, levelTouched, isApproaching, signal,
@@ -366,6 +377,7 @@ class ForexAnalysisService {
           expectedDirection: sig.expectedDirection,
           probability: sig.probability,
           signal: sig.signal,
+          reason: sig.reason || '',
           entryPrice: sig.entryPrice,
           stopLoss: sig.stopLoss,
           takeProfit: sig.takeProfit,

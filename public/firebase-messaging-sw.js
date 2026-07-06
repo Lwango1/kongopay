@@ -21,8 +21,9 @@ messaging.onBackgroundMessage((payload) => {
   const pair = data?.pair || "";
   const prob = data?.probability ? `${data.probability}%` : "";
   const signal = data?.signal || "";
+  const reason = data?.reason || "";
 
-  const notifBody = [pair, direction, signal, prob, body].filter(Boolean).join(" · ");
+  const notifBody = [pair, direction, signal, prob, reason, body].filter(Boolean).join(" · ");
 
   const tag = data?.key || data?.pair || "forex-signal";
   self.registration.showNotification(title || "KongoPay Signal Forex", {
