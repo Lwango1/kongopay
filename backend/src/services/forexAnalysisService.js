@@ -116,7 +116,29 @@ class ForexAnalysisService {
 
   // ─── SMC / ICT Concepts ─────────────────────────────────────────
 
-  detectFVG(candles) {
+  detectFVG(candles, prices) {
+    if (candles.length >= 3) return this._detectFVGCandles(candles);
+    if (prices && prices.length >= 15) {
+      const clusters = [];
+      for (let i = 3; i < prices.length; i++) {
+        const gap = prices[i] - prices[i - 2];
+        if (Math.abs(gap) / (prices[i - 2] || 1) > 0.001) {
+          clusters.push({
+            type: gap > 0 ? 'bullish' : 'bearish',
+            bottom: Math.min(prices[i - 2], prices[i]),
+            top: Math.max(prices[i - 2], prices[i]),
+            mid: (prices[i - 2] + prices[i]) / 2,
+            strength: 1,
+            time: Date.now(),
+          });
+        }
+      }
+      return clusters.slice(-6);
+    }
+    return [];
+  }
+
+  _detectFVGCandles(candles) {
     if (candles.length < 3) return [];
     const fvgs = [];
     for (let i = 2; i < candles.length; i++) {
@@ -270,7 +292,7 @@ class ForexAnalysisService {
     const store = this.candles.get(key);
     if (!store) return null;
     const prices = store.prices;
-    if (prices.length < 30) return null;
+    if (prices.length < 15) return null;
 
     const m15 = store.m15;
     const m30 = store.m30;
@@ -284,12 +306,13 @@ class ForexAnalysisService {
     const { nearestSupport, nearestResistance, allLevels } = findSupportResistance(prices, currentPrice);
     const orderBlocks = findOrderBlocks(prices);
     const regime = analyzeRegime(prices);
-    const fvgs = this.detectFVG(m15);
+    const tfCandles = m15.length >= 3 ? m15 : (m30.length >= 3 ? m30 : (h1.length >= 3 ? h1 : null));
+    const fvgs = this.detectFVG(tfCandles || m15, prices);
     const ote = this.detectOTE(prices);
     const pd = this.detectPDArray(prices);
     const displacement = this.detectDisplacement(m15);
     const killzone = this.detectKillzone();
-    const patterns = detectCandlestickPatterns(m15);
+    const patterns = tfCandles ? detectCandlestickPatterns(tfCandles) : [];
     const patternSignal = getPatternSignal(patterns);
 
     const activeFVG = fvgs.length > 0 ? fvgs[fvgs.length - 1] : null;
@@ -438,6 +461,23 @@ class ForexAnalysisService {
       }
     }
 
+    // Boost probability when RSI extremes align with S/R levels
+    const nearLevel = upDist < maxDistance * 0.3 || downDist < maxDistance * 0.3;
+    if (nearLevel) {
+      const rsiBoost = rsi < 20 ? 15 : rsi < 30 ? 10 : rsi > 80 ? 15 : rsi > 70 ? 10 : 0;
+      probability += rsiBoost * (isUpDirection && rsi < 30 ? 1 : !isUpDirection && rsi > 70 ? 1 : 0.5);
+    }
+    // Boost when approaching with valid S/R
+    if (isApproaching && refStrength >= 3) probability += 8;
+    if (levelTouched && refStrength >= 3) probability += 5;
+    // OTE proximity boost
+    if (inOTE) probability += 8;
+    // Active FVG boost
+    if (activeFVG && !fvgMitigated) probability += 6;
+    // Displacement boost
+    if (displacement.detected) probability += 10;
+    probability = Math.min(Math.max(Math.round(probability), 20), 95);
+
     const isSpikeImminent = probability >= 70 && (levelTouched || isApproaching);
 
     const lookback = Math.min(prices.length, 100);
@@ -453,8 +493,8 @@ class ForexAnalysisService {
     const stopLoss = isUpDirection ? currentPrice - slBuffer : currentPrice + slBuffer;
     const takeProfit = isUpDirection ? currentPrice + slBuffer * tpMult : currentPrice - slBuffer * tpMult;
 
-    const strongThreshold = 85;
-    const signalThreshold = 75;
+    const strongThreshold = 70;
+    const signalThreshold = 55;
     const signal = probability >= strongThreshold
       ? (isUpDirection ? 'STRONG_BUY' : 'STRONG_SELL')
       : probability >= signalThreshold
@@ -516,7 +556,7 @@ class ForexAnalysisService {
     for (const { symbol, pair, type } of FOREX_SYMBOLS) {
       const key = buildCandleKey(symbol);
       const store = this.candles.get(key);
-      if (!store || store.prices.length < 30) continue;
+      if (!store || store.prices.length < 15) continue;
 
       const analysis = this.analyzePair(key);
       if (analysis) {
@@ -531,7 +571,7 @@ class ForexAnalysisService {
     const divergences = this.detectSMTDivergence(analysisResults);
 
     const signals = results
-      .filter(r => r.probability >= 65 && r.signal !== 'WATCH')
+      .filter(r => r.signal !== 'WATCH')
       .sort((a, b) => b.probability - a.probability)
       .slice(0, 10);
 
