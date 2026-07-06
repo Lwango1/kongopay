@@ -1,137 +1,238 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Newspaper, TrendingUp, TrendingDown, AlertTriangle, Calendar, BarChart3, Loader2, RefreshCw } from "lucide-react";
-import type { EconomicEvent, NewsSignal } from "@/lib/newsData";
+import {
+  TrendingUp, TrendingDown, AlertTriangle, BarChart3, Loader2, RefreshCw,
+  Zap, Flame, Droplet, Target, Crosshair, Layers, DollarSign,
+} from "lucide-react";
 
-function ImpactBadge({ impact }: { impact: EconomicEvent["impact"] }) {
-  const colors = {
-    high: "bg-danger/20 text-danger border-danger/30",
-    medium: "bg-warning/20 text-warning border-warning/30",
-    low: "bg-primary/20 text-primary border-primary/30",
-  };
-  return (
-    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${colors[impact]}`}>
-      {impact}
-    </span>
-  );
+interface FVG {
+  type: "bullish" | "bearish";
+  bottom: number;
+  top: number;
+  mitigated: boolean;
 }
 
-function StatusBadge({ status }: { status: EconomicEvent["status"] }) {
-  if (status === "live") return <span className="text-[10px] font-bold text-success animate-pulse">● EN DIRECT</span>;
-  if (status === "done") return <span className="text-[10px] text-text-muted">✓ Terminé</span>;
-  return <span className="text-[10px] text-primary">À venir</span>;
+interface OTE {
+  low: number;
+  high: number;
 }
 
-function SentimentBadge({ sentiment, confidence }: { sentiment: EconomicEvent["sentiment"]; confidence: number }) {
-  if (!sentiment) return null;
-  const colors = {
-    bullish: "text-success",
-    bearish: "text-danger",
-    neutral: "text-text-muted",
-  };
-  return <span className={`text-xs font-bold ${colors[sentiment]}`}>{sentiment === "bullish" ? "📈 " : sentiment === "bearish" ? "📉 " : "➖ "}{confidence}%</span>;
+interface PDArray {
+  zone: "premium" | "discount";
+  distanceFromMid: number;
+}
+
+interface Displacement {
+  direction: "bullish" | "bearish";
+  ratio: number;
+}
+
+interface OrderBlock {
+  price: number;
+  type: "bullish" | "bearish";
+  strength: number;
+}
+
+interface SRLevel {
+  price: number;
+  strength: number;
+  type: "support" | "resistance";
+}
+
+interface CandlePattern {
+  name: string;
+  signal: string;
+  strength: number;
+}
+
+interface PairAnalysis {
+  key: string;
+  pair: string;
+  type: "forex" | "commodity";
+  currentPrice: number;
+  probability: number;
+  expectedDirection: "up" | "down";
+  estimatedMagnitude: string;
+  isSpikeImminent: boolean;
+  levelTouched: boolean;
+  isApproaching: boolean;
+  signal: string;
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  rsi: number;
+  trend: string;
+  regime: string;
+  volatility: string;
+  killzone: string;
+  fvg: FVG | null;
+  ote: OTE | null;
+  pdArray: PDArray | null;
+  displacement: Displacement | null;
+  orderBlocks: OrderBlock[];
+  sRlevels: SRLevel[];
+  candlePatterns: CandlePattern[];
+  upScore: number;
+  downScore: number;
+}
+
+interface SMTDivergence {
+  pairA: string;
+  pairB: string;
+  type: string;
+  signal: "bullish" | "bearish";
+  strength: number;
+  aRsi?: number;
+  bRsi?: number;
+  aDirection?: string;
+  bDirection?: string;
+}
+
+interface ForexData {
+  connected: boolean;
+  pairs: PairAnalysis[];
+  signals: PairAnalysis[];
+  divergences: SMTDivergence[];
+  killzone: string;
+  source: string;
+  timestamp: number;
 }
 
 function formatPrice(price: number, pair: string): string {
-  const decimals = pair === "XAUUSD" ? 2 : pair.includes("JPY") ? 2 : 5;
-  return price.toFixed(decimals);
+  if (pair === "XAU/USD") return price.toFixed(2);
+  if (pair.includes("JPY")) return price.toFixed(2);
+  return price.toFixed(5);
 }
 
-function SignalCard({ signal }: { signal: NewsSignal }) {
-  const dirColors = {
-    up: "border-success/30 bg-success/5",
-    down: "border-danger/30 bg-danger/5",
-    null: "border-border bg-surface",
-  };
-  const dir = signal.direction || "null";
+function DirectionIcon({ dir }: { dir: string }) {
+  if (dir === "up") return <TrendingUp size={14} className="text-success" />;
+  if (dir === "down") return <TrendingDown size={14} className="text-danger" />;
+  return null;
+}
+
+function ProbBar({ value }: { value: number }) {
+  const color = value >= 80 ? "bg-success" : value >= 65 ? "bg-warning" : "bg-danger";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="w-16 h-1.5 rounded-full bg-surface-light overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
+      </div>
+      <span className={`font-mono text-xs font-bold ${value >= 80 ? "text-success" : value >= 65 ? "text-warning" : "text-text-muted"}`}>{value}%</span>
+    </div>
+  );
+}
+
+function PairCard({ pair }: { pair: PairAnalysis }) {
+  const hasSignal = pair.signal !== "WATCH" && pair.probability >= 65;
+  const borderColor = hasSignal
+    ? pair.expectedDirection === "up" ? "border-success/30 bg-success/3" : "border-danger/30 bg-danger/3"
+    : "border-border bg-surface";
 
   return (
-    <div className={`rounded-xl border p-4 ${dirColors[dir]}`}>
-      <div className="flex items-start justify-between mb-2">
+    <div className={`rounded-xl border p-3 ${borderColor}`}>
+      <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-text-muted">{signal.event.country} · {signal.event.time}</span>
-          <ImpactBadge impact={signal.event.impact} />
+          {pair.type === "commodity" ? <Droplet size={16} className="text-warning" /> : <DollarSign size={16} className="text-primary" />}
+          <span className="font-bold text-sm">{pair.pair}</span>
+          {pair.isSpikeImminent && <span className="text-[9px] px-1.5 py-0.5 rounded bg-danger/20 text-danger border border-danger/30 font-bold">ALERTE</span>}
         </div>
-        <StatusBadge status={signal.event.status} />
-      </div>
-
-      <h4 className="font-semibold text-sm mb-1">{signal.event.title}</h4>
-
-      <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-        <div className="bg-background rounded p-1.5">
-          <span className="text-text-muted">Prév.</span>
-          <p className="font-mono font-bold">{signal.event.forecast}</p>
-        </div>
-        <div className="bg-background rounded p-1.5">
-          <span className="text-text-muted">Préc.</span>
-          <p className="font-mono">{signal.event.previous}</p>
-        </div>
-        <div className="bg-background rounded p-1.5">
-          <span className="text-text-muted">Signal</span>
-          <p className={`font-mono font-bold ${signal.side === "buy" ? "text-success" : signal.side === "sell" ? "text-danger" : "text-text-muted"}`}>
-            {signal.side ? signal.side.toUpperCase() : "NEUTRE"}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between text-xs mb-2">
-        <span className="text-text-muted">Probabilité</span>
         <div className="flex items-center gap-2">
-          <div className="w-20 h-1.5 bg-background rounded-full overflow-hidden">
-            <div className={`h-full rounded-full ${signal.probability > 70 ? "bg-success" : signal.probability > 50 ? "bg-warning" : "bg-danger"}`}
-              style={{ width: `${signal.probability}%` }} />
-          </div>
-          <span className={`font-bold font-mono text-xs ${signal.probability > 70 ? "text-success" : signal.probability > 50 ? "bg-warning" : "bg-danger"}`}>
-            {signal.probability}%
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface-light text-text-muted border border-border">{pair.killzone}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${pair.regime === "trending_bull" ? "text-success bg-success/10" : pair.regime === "trending_bear" ? "text-danger bg-danger/10" : "text-text-muted bg-surface-light"}`}>
+            {pair.trend}
           </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 text-[10px] mb-2 bg-background/60 rounded-lg p-2">
-        <div className="text-center">
-          <span className="text-text-muted block">Paire</span>
-          <span className="text-text font-mono font-bold">{signal.pair}</span>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="font-mono font-bold text-lg">{formatPrice(pair.currentPrice, pair.pair)}</span>
+          <DirectionIcon dir={pair.expectedDirection} />
+          {hasSignal && (
+            <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${pair.signal === "STRONG_BUY" || pair.signal === "STRONG_SELL" ? "bg-primary/20 text-primary border border-primary/30" : "bg-surface-light text-text-muted border border-border"}`}>
+              {pair.signal}
+            </span>
+          )}
         </div>
-        <div className="text-center">
-          <span className="text-text-muted block">Entry</span>
-          <span className="text-text font-mono font-bold">{formatPrice(signal.entry, signal.pair)}</span>
-        </div>
-        <div className="text-center">
-          <span className="text-text-muted block">TP</span>
-          <span className="text-success font-mono font-bold">{formatPrice(signal.takeProfit, signal.pair)}</span>
-        </div>
-        <div className="text-center">
-          <span className="text-text-muted block">SL</span>
-          <span className="text-danger font-mono font-bold">{formatPrice(signal.stopLoss, signal.pair)}</span>
-        </div>
+        <ProbBar value={pair.probability} />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-        <div className="bg-background/30 rounded p-1.5 text-center">
-          <span className="text-text-muted block">TP1</span>
-          <span className="text-success font-mono font-bold">{signal.targets.tp1}</span>
+      {hasSignal && (
+        <div className="grid grid-cols-3 gap-1 text-[10px] mb-2 bg-background/60 rounded-lg p-2">
+          <div className="text-center">
+            <span className="text-text-muted block">Entry</span>
+            <span className="font-mono font-bold text-text">{formatPrice(pair.entryPrice, pair.pair)}</span>
+          </div>
+          <div className="text-center">
+            <span className="text-text-muted block">TP</span>
+            <span className="font-mono font-bold text-success">{formatPrice(pair.takeProfit, pair.pair)}</span>
+          </div>
+          <div className="text-center">
+            <span className="text-text-muted block">SL</span>
+            <span className="font-mono font-bold text-danger">{formatPrice(pair.stopLoss, pair.pair)}</span>
+          </div>
         </div>
-        <div className="bg-background/30 rounded p-1.5 text-center">
-          <span className="text-text-muted block">TP2</span>
-          <span className="text-primary font-mono font-bold">{signal.targets.tp2}</span>
-        </div>
-        <div className="bg-background/30 rounded p-1.5 text-center">
-          <span className="text-text-muted block">SL</span>
-          <span className="text-danger font-mono font-bold">{signal.targets.sl}</span>
-        </div>
+      )}
+
+      {/* SMC/ICT badges */}
+      <div className="flex flex-wrap gap-1 mb-1">
+        {pair.fvg && !pair.fvg.mitigated && (
+          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${pair.fvg.type === "bullish" ? "bg-success/10 text-success border border-success/20" : "bg-danger/10 text-danger border border-danger/20"}`}>
+            FVG {pair.fvg.type === "bullish" ? "+" : "-"}
+          </span>
+        )}
+        {pair.ote && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-primary/10 text-primary border border-primary/20">
+            OTE
+          </span>
+        )}
+        {pair.pdArray && (
+          <span className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${pair.pdArray.zone === "premium" ? "bg-danger/10 text-danger border border-danger/20" : "bg-success/10 text-success border border-success/20"}`}>
+            {pair.pdArray.zone === "premium" ? "Premium" : "Discount"}
+          </span>
+        )}
+        {pair.displacement && (
+          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-warning/10 text-warning border border-warning/20">
+            Disp {pair.displacement.direction === "bullish" ? "↑" : "↓"} x{pair.displacement.ratio}
+          </span>
+        )}
+        {pair.candlePatterns.map((p, i) => (
+          <span key={i} className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${p.signal === "bullish" ? "bg-success/10 text-success border border-success/20" : p.signal === "bearish" ? "bg-danger/10 text-danger border border-danger/20" : "bg-surface-light text-text-muted border border-border"}`}>
+            {p.name}
+          </span>
+        ))}
       </div>
 
-      <p className="text-xs text-text-secondary italic">{signal.reasoning}</p>
+      {/* Scores */}
+      <div className="flex items-center gap-3 text-[10px] text-text-muted">
+        <span>↑{pair.upScore} ↓{pair.downScore}</span>
+        <span>RSI {pair.rsi}</span>
+        <span>Mag {pair.estimatedMagnitude}</span>
+        <span>{pair.levelTouched ? "Touché" : pair.isApproaching ? "Approche" : ""}</span>
+      </div>
+    </div>
+  );
+}
+
+function DivergenceBadge({ div }: { div: SMTDivergence }) {
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-xs ${div.signal === "bullish" ? "border-success/30 bg-success/5" : "border-danger/30 bg-danger/5"}`}>
+      <div className="flex items-center gap-2">
+        <Layers size={12} className={div.signal === "bullish" ? "text-success" : "text-danger"} />
+        <span className="font-semibold">SMT {div.type}</span>
+        <span className={div.signal === "bullish" ? "text-success" : "text-danger"}>{div.signal === "bullish" ? "↑" : "↓"}</span>
+      </div>
+      <p className="text-text-muted mt-0.5">{div.pairA} vs {div.pairB} (force: {div.strength})</p>
+      {div.aRsi != null && <p className="text-text-muted">RSI: {div.pairA}={div.aRsi} / {div.pairB}={div.bRsi}</p>}
     </div>
   );
 }
 
 export default function NewsTrader() {
-  const [data, setData] = useState<{ events: EconomicEvent[]; signals: NewsSignal[]; marketContext: any; source?: string } | null>(null);
-  const [filter, setFilter] = useState<"all" | EconomicEvent["impact"]>("all");
+  const [data, setData] = useState<ForexData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [source, setSource] = useState<string>("");
+  const [filter, setFilter] = useState<"all" | "signals">("signals");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -140,10 +241,8 @@ export default function NewsTrader() {
       if (res.ok) {
         const json = await res.json();
         setData(json);
-        setSource(json.source || "");
       }
     } catch {
-      // fallback silencieux
     } finally {
       setLoading(false);
     }
@@ -151,29 +250,31 @@ export default function NewsTrader() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 300000);
+    const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const filtered = filter === "all" ? (data?.events || []) : (data?.events || []).filter(e => e.impact === filter);
-  const upcomingCount = (data?.events || []).filter(e => e.status === "upcoming").length;
-  const highImpactCount = (data?.events || []).filter(e => e.impact === "high" && e.status === "upcoming").length;
+  const pairsToShow = filter === "signals"
+    ? (data?.signals || [])
+    : (data?.pairs || []);
+
+  const highProbCount = (data?.signals || []).filter(s => s.probability >= 80).length;
+  const signalCount = (data?.signals || []).length;
 
   return (
     <section className="max-w-6xl mx-auto py-12 px-4">
       <div className="flex items-center justify-between mb-6">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <Newspaper size={24} className="text-primary" />
-            <h2 className="text-2xl font-bold">News Trading</h2>
-            {source === "finnhub" && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold animate-pulse">
-                ● EN DIRECT
-              </span>
+            <Target size={24} className="text-primary" />
+            <h2 className="text-2xl font-bold">SMC / ICT Analysis</h2>
+            {data?.connected === true && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/20 text-success font-semibold animate-pulse">● EN DIRECT</span>
             )}
           </div>
           <p className="text-text-secondary text-sm">
-            Anticipez les mouvements du marché avant les annonces économiques majeures.
+            Fair Value Gaps · Optimal Trade Entry · Premium/Discount · SMT Divergence · Order Blocks
+            {data?.killzone && <span className="ml-2 text-primary">· {data.killzone}</span>}
           </p>
         </div>
         <button onClick={fetchData} disabled={loading}
@@ -188,128 +289,120 @@ export default function NewsTrader() {
         </div>
       )}
 
-      {!loading && (!data || (data.events.length === 0 && data.source === "finnhub")) && (
+      {!loading && !data?.connected && !data?.pairs?.length && (
         <div className="rounded-xl border border-border bg-surface p-12 text-center">
           <BarChart3 size={40} className="mx-auto text-text-muted mb-3" />
-          <p className="text-text-muted mb-1">Aucune annonce économique aujourd'hui</p>
-          <p className="text-xs text-text-secondary">Le calendrier Finnhub ne contient pas d'événements pour aujourd'hui.</p>
+          <p className="text-text-muted mb-1">Connexion en cours...</p>
+          <p className="text-xs text-text-secondary">WebSocket Deriv en cours de connexion aux paires forex.</p>
         </div>
       )}
 
-      {!loading && data && data.source === "error" && (
+      {data?.connected === false && (
         <div className="rounded-xl border border-danger/30 bg-danger/10 p-12 text-center">
           <AlertTriangle size={40} className="mx-auto text-danger mb-3" />
-          <p className="text-danger font-medium mb-1">Service indisponible</p>
-          <p className="text-xs text-text-secondary">Impossible de contacter Finnhub. Réessaie plus tard.</p>
+          <p className="text-danger font-medium mb-1">Déconnecté</p>
+          <p className="text-xs text-text-secondary">Impossible de se connecter à Deriv WebSocket.</p>
         </div>
       )}
 
       {data && (
         <>
           {/* Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-4 gap-4 mb-6">
             <div className="rounded-xl border border-border bg-surface p-4 text-center">
-              <Calendar size={18} className="mx-auto text-primary mb-1" />
-              <p className="text-2xl font-bold text-text">{upcomingCount}</p>
-              <p className="text-xs text-text-muted">Annonces à venir</p>
+              <BarChart3 size={18} className="mx-auto text-primary mb-1" />
+              <p className="text-2xl font-bold text-text">{data.pairs.length}</p>
+              <p className="text-xs text-text-muted">Paires analysées</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4 text-center">
-              <AlertTriangle size={18} className="mx-auto text-danger mb-1" />
-              <p className="text-2xl font-bold text-danger">{highImpactCount}</p>
-              <p className="text-xs text-text-muted">Haut impact</p>
+              <Target size={18} className="mx-auto text-success mb-1" />
+              <p className="text-2xl font-bold text-success">{signalCount}</p>
+              <p className="text-xs text-text-muted">Signaux actifs</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4 text-center">
-              <TrendingUp size={18} className="mx-auto text-success mb-1" />
-              <p className="text-2xl font-bold text-success">{data.signals.length}</p>
-              <p className="text-xs text-text-muted">Signaux générés</p>
+              <Zap size={18} className="mx-auto text-warning mb-1" />
+              <p className="text-2xl font-bold text-warning">{highProbCount}</p>
+              <p className="text-xs text-text-muted">≥80% probabilité</p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface p-4 text-center">
+              <Layers size={18} className="mx-auto text-primary mb-1" />
+              <p className="text-2xl font-bold text-primary">{data.divergences.length}</p>
+              <p className="text-xs text-text-muted">SMT divergences</p>
             </div>
           </div>
 
-          {/* Signals */}
-          {data.signals.length > 0 && (
-            <>
+          {/* SMT Divergences */}
+          {data.divergences.length > 0 && (
+            <div className="mb-6">
               <h3 className="font-semibold mb-3 flex items-center gap-2">
-                <TrendingUp size={16} className="text-success" />
-                Signaux recommandés
+                <Layers size={16} className="text-primary" />
+                SMT Divergences
               </h3>
-              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
-                {data.signals.slice(0, 6).map((sig) => (
-                  <SignalCard key={sig.event.id} signal={sig} />
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {data.divergences.map((div, i) => (
+                  <DivergenceBadge key={i} div={div} />
                 ))}
               </div>
-            </>
+            </div>
           )}
 
-          {/* Full calendar */}
+          {/* Filters */}
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Calendrier économique</h3>
+            <h3 className="font-semibold">{filter === "signals" ? "Signaux" : "Toutes les paires"}</h3>
             <div className="flex gap-2">
-              {(["all", "high", "medium", "low"] as const).map((f) => (
+              {(["signals", "all"] as const).map((f) => (
                 <button key={f} onClick={() => setFilter(f)}
                   className={`px-3 py-1 rounded-lg text-xs font-medium transition ${filter === f ? "bg-primary text-white" : "bg-surface text-text-secondary border border-border hover:text-text"}`}>
-                  {f === "all" ? "Tous" : f.charAt(0).toUpperCase() + f.slice(1)}
+                  {f === "signals" ? `Signaux (${signalCount})` : `Toutes (${data.pairs.length})`}
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-text-muted text-xs uppercase tracking-wider">
-                  <th className="text-left py-3 px-3 font-medium">Date</th>
-                  <th className="text-left py-3 px-3 font-medium">Heure</th>
-                  <th className="text-left py-3 px-3 font-medium">Événement</th>
-                  <th className="text-center py-3 px-3 font-medium">Impact</th>
-                  <th className="text-right py-3 px-3 font-medium">Précédent</th>
-                  <th className="text-right py-3 px-3 font-medium">Prévision</th>
-                  <th className="text-right py-3 px-3 font-medium">Réel</th>
-                  <th className="text-center py-3 px-3 font-medium">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.slice(0, 20).map((ev) => {
-                  const isHigh = ev.impact === "high";
-                  return (
-                    <tr key={ev.id} className={`border-b border-border/30 hover:bg-surface/50 transition ${isHigh ? "bg-danger/5" : ""}`}>
-                      <td className="py-2.5 px-3 text-xs text-text-muted">{ev.date}</td>
-                      <td className="py-2.5 px-3 font-mono text-xs text-text">{ev.time}</td>
-                      <td className="py-2.5 px-3">
-                        <span className="font-medium text-xs text-text">{ev.title}</span>
-                      </td>
-                      <td className="py-2.5 px-3 text-center"><ImpactBadge impact={ev.impact} /></td>
-                      <td className="py-2.5 px-3 text-right font-mono text-xs text-text-muted">{ev.previous}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-xs text-primary">{ev.forecast}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-xs">
-                        {ev.actual ? (
-                          <span className={ev.sentiment === "bullish" ? "text-success" : ev.sentiment === "bearish" ? "text-danger" : "text-text-muted"}>
-                            {ev.actual}
-                          </span>
-                        ) : "—"}
-                      </td>
-                      <td className="py-2.5 px-3 text-center"><StatusBadge status={ev.status} /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Pairs grid */}
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {pairsToShow.map((pair) => (
+              <PairCard key={pair.key} pair={pair} />
+            ))}
           </div>
 
-          {/* Sentiment récent */}
-          {(data.events || []).filter(e => e.status === "done" && e.sentiment).length > 0 && (
-            <div className="mt-8 rounded-xl border border-border bg-surface p-6">
-              <h3 className="font-semibold mb-3">Derniers résultats</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {(data.events || []).filter(e => e.status === "done" && e.sentiment).slice(0, 8).map((ev) => (
-                  <div key={ev.id} className="bg-background rounded-lg p-3 text-xs">
-                    <p className="text-text-muted truncate">{ev.title.split("—")[1] || ev.title}</p>
-                    <p className="mt-1"><SentimentBadge sentiment={ev.sentiment} confidence={ev.confidence} /></p>
-                    <p className="text-text-muted mt-0.5">Réel: {ev.actual} / Prév: {ev.forecast}</p>
-                  </div>
-                ))}
-              </div>
+          {filter === "signals" && signalCount === 0 && data.pairs.length > 0 && (
+            <div className="mt-6 p-6 rounded-xl border border-border bg-surface text-center text-sm text-text-secondary">
+              <Crosshair size={24} className="mx-auto mb-2 text-text-muted" />
+              Aucun信号 de retournement détecté pour le moment. Le scan surveille les 8 paires en continu avec les concepts SMC/ICT.
             </div>
           )}
+
+          {/* SMC/ICT legend */}
+          <div className="mt-8 rounded-xl border border-border bg-surface p-6">
+            <h3 className="font-bold text-lg mb-4">Concepts SMC / ICT utilisés</h3>
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+              <div>
+                <h4 className="font-semibold text-primary mb-1">Fair Value Gap (FVG)</h4>
+                <p className="text-text-secondary text-xs">Écart de prix entre 3 bougies consécutives. Non comblé = zone d&apos;intérêt pour un retournement.</p>
+              </div>
+              <div>
+                <h4 className="font-semibold text-primary mb-1">Optimal Trade Entry (OTE)</h4>
+                <p className="text-text-secondary text-xs">Zone Fibonacci 0.618-0.79. Le prix qui retrace dans cette zone offre le meilleur ratio risque/rendement.</p>
+              </div>
+              <div>
+                <h4 className="font-semibold text-primary mb-1">Premium / Discount</h4>
+                <p className="text-text-secondary text-xs">La zone au-dessus de 50% de la range = Premium (vendre), en dessous = Discount (acheter).</p>
+              </div>
+              <div>
+                <h4 className="font-semibold text-primary mb-1">SMT Divergence</h4>
+                <p className="text-text-secondary text-xs">Divergence entre paires corrélées (EUR/USD vs USD/CHF, GBP/USD vs USD/JPY). Signale un retournement imminent.</p>
+              </div>
+              <div>
+                <h4 className="font-semibold text-primary mb-1">Displacement</h4>
+                <p className="text-text-secondary text-xs">Bougie agressive avec un corps 2x plus grand que la moyenne. Montre l&apos;intention des institutionnels.</p>
+              </div>
+              <div>
+                <h4 className="font-semibold text-primary mb-1">Order Blocks + S/R</h4>
+                <p className="text-text-secondary text-xs">Blocs d&apos;ordres institutionnels avec clustering de pivots S/R. Confluence multi-timeframe (15m, 30m, 1h, 2h).</p>
+              </div>
+            </div>
+          </div>
         </>
       )}
     </section>

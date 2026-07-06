@@ -33,6 +33,7 @@ import notificationsRoutes from './routes/notifications.js';
 import signalsRoutes from './routes/signals.js';
 import cryptoRoutes from './routes/crypto.js';
 import newsRoutes from './routes/news.js';
+import forexAnalysisRoutes from './routes/forexAnalysis.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -76,6 +77,7 @@ app.use('/api/engagement', authLimiter, engagementRoutes);
 app.use('/api/fees', authLimiter, feesRoutes);
 app.use('/api/notifications', authLimiter, notificationsRoutes);
 app.use('/api/signals', authLimiter, signalsRoutes);
+app.use('/api/forex-analysis', forexAnalysisRoutes);
 
 app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', version: '2.0.0', name: 'KongoPay API' });
@@ -104,6 +106,9 @@ app.use(errorHandler);
 async function startBackgroundTasks() {
   const { forexPrices } = await import('./services/forexPrices.js');
   forexPrices.connect();
+
+  const { forexAnalysis } = await import('./services/forexAnalysisService.js');
+  forexAnalysis.connect();
 
   mlService.init();
   ensembleML.init();
