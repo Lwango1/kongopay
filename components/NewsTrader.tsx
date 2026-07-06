@@ -124,10 +124,15 @@ function ProbBar({ value }: { value: number }) {
 }
 
 function PairCard({ pair }: { pair: PairAnalysis }) {
-  const hasSignal = pair.signal !== "WATCH" && pair.probability >= 65;
+  const hasSignal = pair.signal !== "WATCH";
   const borderColor = hasSignal
     ? pair.expectedDirection === "up" ? "border-success/30 bg-success/3" : "border-danger/30 bg-danger/3"
     : "border-border bg-surface";
+
+  const entryDist = pair.entryPrice ? ((pair.entryPrice - pair.currentPrice) / pair.currentPrice * 100) : 0;
+  const tpDist = pair.takeProfit ? ((pair.takeProfit - pair.currentPrice) / pair.currentPrice * 100) : 0;
+  const slDist = pair.stopLoss ? ((pair.stopLoss - pair.currentPrice) / pair.currentPrice * 100) : 0;
+  const rr = pair.takeProfit && pair.stopLoss ? Math.abs((pair.takeProfit - pair.entryPrice) / (pair.stopLoss - pair.entryPrice)) : 0;
 
   return (
     <div className={`rounded-xl border p-3 ${borderColor}`}>
@@ -159,19 +164,31 @@ function PairCard({ pair }: { pair: PairAnalysis }) {
       </div>
 
       {hasSignal && (
-        <div className="grid grid-cols-3 gap-1 text-[10px] mb-2 bg-background/60 rounded-lg p-2">
-          <div className="text-center">
-            <span className="text-text-muted block">Entry</span>
+        <div className="grid grid-cols-3 gap-1.5 text-[11px] mb-2 bg-background/60 rounded-lg p-2.5">
+          <div className="text-center border-r border-border/40">
+            <span className="text-text-muted block text-[9px] uppercase tracking-wider mb-0.5">Entry</span>
             <span className="font-mono font-bold text-text">{formatPrice(pair.entryPrice, pair.pair)}</span>
+            <span className={`block text-[9px] ${entryDist >= 0 ? "text-danger" : "text-success"}`}>{entryDist >= 0 ? "+" : ""}{entryDist.toFixed(2)}%</span>
           </div>
-          <div className="text-center">
-            <span className="text-text-muted block">TP</span>
+          <div className="text-center border-r border-border/40">
+            <span className="text-text-muted block text-[9px] uppercase tracking-wider mb-0.5">TP</span>
             <span className="font-mono font-bold text-success">{formatPrice(pair.takeProfit, pair.pair)}</span>
+            <span className="block text-[9px] text-success">+{Math.abs(tpDist).toFixed(2)}%</span>
           </div>
           <div className="text-center">
-            <span className="text-text-muted block">SL</span>
+            <span className="text-text-muted block text-[9px] uppercase tracking-wider mb-0.5">SL</span>
             <span className="font-mono font-bold text-danger">{formatPrice(pair.stopLoss, pair.pair)}</span>
+            <span className="block text-[9px] text-danger">-{Math.abs(slDist).toFixed(2)}%</span>
           </div>
+        </div>
+      )}
+      {hasSignal && (
+        <div className="flex items-center justify-between text-[10px] px-1 mb-1">
+          <span className="text-text-muted">R:R <span className="font-bold text-text">{rr.toFixed(1)}</span></span>
+          <span className={`font-semibold ${pair.expectedDirection === "up" ? "text-success" : "text-danger"}`}>
+            {pair.expectedDirection === "up" ? "LONG " : "SHORT "}
+            <span className="text-text-muted font-normal">| {formatPrice(pair.entryPrice, pair.pair)}</span>
+          </span>
         </div>
       )}
 
