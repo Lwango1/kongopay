@@ -160,6 +160,13 @@ async function startBackgroundTasks() {
     } catch { /* background */ }
   }, 30000);
 
+  // Broadcast synthetic index signals every 60s
+  setInterval(() => {
+    try {
+      derivService.scanAllMarkets();
+    } catch { /* background */ }
+  }, 60000);
+
   // News Trading: process signals through risk manager every 5 min
   const { processNewsSignals } = await import('./services/newsRiskBridge.js');
   processNewsSignals(); // initial run

@@ -1001,6 +1001,23 @@ class DerivLiveService {
 
     const { signalTracker } = await import('./signalTracker.js');
     const saved = await signalTracker.recordSignal(signal);
+
+    broadcastSignal({
+      type: signal.type || type,
+      number: signal.number || num,
+      label: signal.label || `${type === 'BOOM' ? 'Boom' : 'Crash'} ${num}`,
+      expectedDirection: signal.expectedDirection,
+      spikeProbability: signal.spikeProbability,
+      estimatedMagnitude: signal.estimatedMagnitude,
+      entryPrice: signal.entryPrice,
+      stopLoss: signal.stopLoss,
+      takeProfit: signal.takeProfit,
+      currentPrice: signal.currentPrice,
+      isSpikeImminent: signal.isSpikeImminent,
+      levelTouched: signal.levelTouched,
+      isApproaching: signal.isApproaching,
+    }).catch(() => {});
+
     return saved;
   }
 
