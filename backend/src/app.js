@@ -109,6 +109,7 @@ async function startBackgroundTasks() {
 
   const { forexAnalysis } = await import('./services/forexAnalysisService.js');
   forexAnalysis.connect();
+  forexAnalysis.startAutoBroadcast();
 
   mlService.init();
   ensembleML.init();

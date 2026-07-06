@@ -25,10 +25,10 @@ export default function NotificationSetup() {
 
   useEffect(() => {
     onForegroundMessage((payload) => {
-      const title = payload?.notification?.title || "KongoPay";
-      const body = payload?.notification?.body || "";
+      const title = payload?.notification?.title || payload?.data?.title || "KongoPay";
+      const body = payload?.notification?.body || payload?.data?.body || "";
       if (title && body && Notification.permission === "granted") {
-        new Notification(title, { body, icon: "/icon.png" });
+        new Notification(title, { body, icon: "/icon-192.svg", tag: "forex-signal" });
       }
     });
   }, []);

@@ -21,6 +21,34 @@ export async function sendSignalNotification(userId, signal) {
     if (!doc.exists) return;
 
     const { token } = doc.data();
+
+    if (signal.type === 'FOREX') {
+      const dir = signal.expectedDirection === 'up' ? '📈 HAUSSE' : '📉 BAISSE';
+      const title = `KongoPay — ${signal.pair}`;
+      const body = `${dir} ${signal.signal} | ${signal.probability}% | Entry ${signal.entryPrice} | TP ${signal.takeProfit} | SL ${signal.stopLoss}`;
+      await admin.messaging().send({
+        token,
+        notification: { title, body },
+        data: {
+          type: 'forex-signal',
+          pair: signal.pair,
+          expectedDirection: signal.expectedDirection,
+          probability: String(signal.probability),
+          signal: signal.signal,
+          entryPrice: String(signal.entryPrice),
+          stopLoss: String(signal.stopLoss),
+          takeProfit: String(signal.takeProfit),
+          currentPrice: String(signal.currentPrice),
+          killzone: signal.killzone || '',
+          estimatedMagnitude: signal.estimatedMagnitude || '',
+          url: '/signaux',
+        },
+        android: { priority: 'high' },
+        apns: { payload: { aps: { sound: 'default', badge: 1 } } },
+      });
+      return;
+    }
+
     const direction = signal.expectedDirection === 'up' ? 'HAUSSE' : 'BAISSE';
     const label = `${signal.type === 'BOOM' ? 'Boom' : 'Crash'} ${signal.number}`;
 
@@ -37,6 +65,7 @@ export async function sendSignalNotification(userId, signal) {
         direction: signal.expectedDirection,
         probability: String(signal.spikeProbability),
         magnitude: signal.estimatedMagnitude,
+        url: '/',
       },
       android: { priority: 'high' },
       apns: { payload: { aps: { sound: 'default', badge: 1 } } },

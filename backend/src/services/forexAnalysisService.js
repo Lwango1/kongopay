@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { broadcastSignal } from './pushNotifications.js';
 import {
   calculateATR, calculateRSI, calculateMomentum,
   findPivots, findSupportResistance, analyzeMarketStructure,
@@ -545,6 +546,39 @@ class ForexAnalysisService {
       upScore: Math.round(upScore * 100),
       downScore: Math.round(downScore * 100),
     };
+  }
+
+  startAutoBroadcast(intervalMs = 120000) {
+    this.broadcastedSignals = new Set();
+    this._broadcastTimer = setInterval(() => {
+      const result = this.scanAll();
+      if (!result.connected || !result.signals.length) return;
+      for (const sig of result.signals) {
+        if (sig.probability < 65) continue;
+        const key = `${sig.pair}|${sig.expectedDirection}|${Math.round(sig.probability / 10) * 10}`;
+        if (this.broadcastedSignals.has(key)) continue;
+        this.broadcastedSignals.add(key);
+        if (this.broadcastedSignals.size > 200) this.broadcastedSignals.clear();
+        broadcastSignal({
+          pair: sig.pair,
+          expectedDirection: sig.expectedDirection,
+          probability: sig.probability,
+          signal: sig.signal,
+          entryPrice: sig.entryPrice,
+          stopLoss: sig.stopLoss,
+          takeProfit: sig.takeProfit,
+          currentPrice: sig.currentPrice,
+          killzone: sig.killzone,
+          label: `${sig.pair} ${sig.signal}`,
+          spikeProbability: sig.probability,
+          type: 'FOREX',
+          number: '',
+          estimatedMagnitude: sig.estimatedMagnitude,
+        }).catch(() => {});
+        console.log(`[ForexAnalysis] Push signal: ${sig.pair} ${sig.signal} ${sig.probability}%`);
+      }
+    }, intervalMs);
+    console.log(`[ForexAnalysis] Auto-broadcast démarré toutes les ${intervalMs / 1000}s`);
   }
 
   scanAll() {

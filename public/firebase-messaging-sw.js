@@ -14,22 +14,30 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
   const { notification, data } = payload;
-  const title = notification?.title || "KongoPay Signal";
-  const body = notification?.body || "";
-  const tag = data?.key || "signal";
+  const title = notification?.title || data?.title || "KongoPay Signal";
+  const body = notification?.body || data?.body || "";
 
-  self.registration.showNotification(title, {
-    body,
-    icon: "/icon.png",
-    badge: "/badge.png",
+  const direction = data?.expectedDirection === "up" ? "📈 HAUSSE" : data?.expectedDirection === "down" ? "📉 BAISSE" : "";
+  const pair = data?.pair || "";
+  const prob = data?.probability ? `${data.probability}%` : "";
+  const signal = data?.signal || "";
+
+  const notifBody = [pair, direction, signal, prob, body].filter(Boolean).join(" · ");
+
+  const tag = data?.key || data?.pair || "forex-signal";
+  self.registration.showNotification(title || "KongoPay Signal Forex", {
+    body: notifBody,
+    icon: "/icon-192.svg",
+    badge: "/icon-192.svg",
     tag,
-    data: { url: data?.url || "/" },
+    data: { url: data?.url || "/signaux" },
     requireInteraction: true,
+    vibrate: [200, 100, 200],
   });
 });
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || "/";
+  const url = event.notification.data?.url || "/signaux";
   event.waitUntil(clients.openWindow(url));
 });

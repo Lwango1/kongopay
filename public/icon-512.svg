@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="64" fill="#0f0f1a"/>
+  <text x="256" y="320" font-family="system-ui" font-size="260" font-weight="bold" fill="#7c3aed" text-anchor="middle">KP</text>
+  <polyline points="160,320 210,240 260,290 310,160 360,210" fill="none" stroke="#22c55e" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
