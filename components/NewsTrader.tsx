@@ -90,11 +90,22 @@ interface SMTDivergence {
   bDirection?: string;
 }
 
+interface ForexStats {
+  total: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  avgPips: number;
+  streak: number;
+  open: number;
+}
+
 interface ForexData {
   connected: boolean;
   pairs: PairAnalysis[];
   signals: PairAnalysis[];
   divergences: SMTDivergence[];
+  stats?: ForexStats;
   killzone: string;
   source: string;
   timestamp: number;
@@ -314,27 +325,57 @@ export default function NewsTrader() {
       {data && (
         <>
           {/* Stats */}
-          <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-5 gap-4 mb-6">
             <div className="rounded-xl border border-border bg-surface p-4 text-center">
               <BarChart3 size={18} className="mx-auto text-primary mb-1" />
               <p className="text-2xl font-bold text-text">{data.pairs.length}</p>
-              <p className="text-xs text-text-muted">Paires analysées</p>
+              <p className="text-xs text-text-muted">Paires</p>
             </div>
             <div className="rounded-xl border border-border bg-surface p-4 text-center">
               <Target size={18} className="mx-auto text-success mb-1" />
               <p className="text-2xl font-bold text-success">{signalCount}</p>
               <p className="text-xs text-text-muted">Signaux actifs</p>
             </div>
-            <div className="rounded-xl border border-border bg-surface p-4 text-center">
-              <Zap size={18} className="mx-auto text-warning mb-1" />
-              <p className="text-2xl font-bold text-warning">{highProbCount}</p>
-              <p className="text-xs text-text-muted">≥80% probabilité</p>
-            </div>
-            <div className="rounded-xl border border-border bg-surface p-4 text-center">
-              <Layers size={18} className="mx-auto text-primary mb-1" />
-              <p className="text-2xl font-bold text-primary">{data.divergences.length}</p>
-              <p className="text-xs text-text-muted">SMT divergences</p>
-            </div>
+            {data.stats && (
+              <>
+                <div className="rounded-xl border border-border bg-surface p-4 text-center">
+                  <Zap size={18} className={`mx-auto mb-1 ${data.stats.winRate >= 60 ? 'text-success' : data.stats.winRate >= 40 ? 'text-warning' : 'text-danger'}`} />
+                  <p className="text-2xl font-bold text-text">{data.stats.winRate}%</p>
+                  <p className="text-xs text-text-muted">Win rate ({data.stats.wins}/{data.stats.total})</p>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-4 text-center">
+                  <Flame size={18} className={`mx-auto mb-1 ${data.stats.streak > 0 ? 'text-success' : data.stats.streak < 0 ? 'text-danger' : 'text-text-muted'}`} />
+                  <p className={`text-2xl font-bold ${data.stats.streak > 0 ? 'text-success' : data.stats.streak < 0 ? 'text-danger' : 'text-text'}`}>
+                    {data.stats.streak > 0 ? `+${data.stats.streak}` : data.stats.streak || '0'}
+                  </p>
+                  <p className="text-xs text-text-muted">Série en cours</p>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-4 text-center">
+                  <DollarSign size={18} className="mx-auto text-primary mb-1" />
+                  <p className="text-2xl font-bold text-text">{data.stats.avgPips}</p>
+                  <p className="text-xs text-text-muted">Pips moyen</p>
+                </div>
+              </>
+            )}
+            {!data.stats && (
+              <>
+                <div className="rounded-xl border border-border bg-surface p-4 text-center">
+                  <Zap size={18} className="mx-auto text-warning mb-1" />
+                  <p className="text-2xl font-bold text-warning">{highProbCount}</p>
+                  <p className="text-xs text-text-muted">≥80% probabilité</p>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-4 text-center">
+                  <Layers size={18} className="mx-auto text-primary mb-1" />
+                  <p className="text-2xl font-bold text-primary">{data.divergences.length}</p>
+                  <p className="text-xs text-text-muted">SMT divergences</p>
+                </div>
+                <div className="rounded-xl border border-border bg-surface p-4 text-center">
+                  <BarChart3 size={18} className="mx-auto text-text-muted mb-1" />
+                  <p className="text-2xl font-bold text-text-muted">—</p>
+                  <p className="text-xs text-text-muted">Stats en cours</p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* SMT Divergences */}

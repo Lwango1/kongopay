@@ -36,6 +36,9 @@ class ForexAnalysisService {
     this.directionMemory = new Map(); // key -> { history: string[], lockedUntil: number }
     this.broadcastedSignals = new Set();
 
+    this.trades = []; // { pair, direction, entry, sl, tp, openedAt, resolvedAt, result, exitPrice }
+    this.scanCount = 0;
+
     for (const { symbol } of FOREX_SYMBOLS) {
       const key = buildCandleKey(symbol);
       this.candles.set(key, {
@@ -45,6 +48,54 @@ class ForexAnalysisService {
       this.prices.set(key, { price: 0, bid: 0, ask: 0, timestamp: 0 });
       this.directionMemory.set(key, { history: [], lockedUntil: 0 });
     }
+  }
+
+  _resolveTrades() {
+    for (const t of this.trades) {
+      if (t.result) continue;
+      const key = buildCandleKey(t.symbol);
+      const entry = this.prices.get(key);
+      if (!entry || !entry.price) continue;
+      const p = entry.price;
+      const up = t.direction === 'up';
+      if (up && p >= t.tp) { t.result = 'win'; t.exitPrice = p; t.resolvedAt = Date.now(); }
+      else if (up && p <= t.sl) { t.result = 'loss'; t.exitPrice = p; t.resolvedAt = Date.now(); }
+      else if (!up && p <= t.tp) { t.result = 'win'; t.exitPrice = p; t.resolvedAt = Date.now(); }
+      else if (!up && p >= t.sl) { t.result = 'loss'; t.exitPrice = p; t.resolvedAt = Date.now(); }
+    }
+  }
+
+  _openTrade(pair, symbol, direction, entry, sl, tp) {
+    this.trades.push({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      pair, symbol, direction, entry, sl, tp,
+      openedAt: Date.now(), resolvedAt: null, result: null, exitPrice: null,
+    });
+    if (this.trades.length > 500) this.trades = this.trades.slice(-400);
+  }
+
+  getPerformanceStats() {
+    this._resolveTrades();
+    const closed = this.trades.filter(t => t.result);
+    const wins = closed.filter(t => t.result === 'win');
+    const total = closed.length;
+    const winRate = total > 0 ? Math.round(wins.length / total * 100) : 0;
+    const avgPips = total > 0 ? Math.round(closed.reduce((s, t) => {
+      const pips = Math.abs(t.exitPrice - t.entry) * 10000;
+      return s + (t.result === 'win' ? pips : -pips);
+    }, 0) / total) : 0;
+    const streak = this._currentStreak();
+    return { total, wins: wins.length, losses: total - wins.length, winRate, avgPips, streak, open: this.trades.filter(t => !t.result).length };
+  }
+
+  _currentStreak() {
+    const closed = this.trades.filter(t => t.result).reverse();
+    let count = 0;
+    for (const t of closed) {
+      if (t.result === (count >= 0 ? 'win' : 'loss')) count = t.result === 'win' ? Math.abs(count) + 1 : -(Math.abs(count) + 1);
+      else break;
+    }
+    return count;
   }
 
   _getStableDirection(key, proposedUp) {
@@ -398,6 +449,9 @@ class ForexAnalysisService {
   scanAll() {
     if (!this.connected) return { connected: false, pairs: [], signals: [], source: 'disconnected' };
 
+    this._resolveTrades();
+    this.scanCount++;
+
     const results = [];
     const analysisResults = new Map();
 
@@ -412,6 +466,14 @@ class ForexAnalysisService {
         analysis.type = type;
         analysisResults.set(key, { ...analysis, prices: store.prices });
         results.push(analysis);
+
+        // Open trade for new non-WATCH signals
+        if (analysis.signal !== 'WATCH') {
+          const existing = this.trades.find(t => !t.result && t.direction === analysis.expectedDirection && t.symbol === symbol);
+          if (!existing) {
+            this._openTrade(pair, symbol, analysis.expectedDirection, analysis.entryPrice, analysis.stopLoss, analysis.takeProfit);
+          }
+        }
       }
     }
 
@@ -428,6 +490,7 @@ class ForexAnalysisService {
       pairs: results,
       signals,
       divergences,
+      stats: this.getPerformanceStats(),
       killzone: this.detectKillzone(),
       source: 'forex-analysis',
       timestamp: now(),
