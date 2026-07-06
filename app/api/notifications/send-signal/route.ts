@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+const IS_DEV = process.env.NODE_ENV === "development";
+const BACKEND_URL = IS_DEV ? "http://localhost:3001/api" : (process.env.NEXT_PUBLIC_API_URL || "https://kongopay.onrender.com/api");
 
 export async function POST(req: NextRequest) {
   try {

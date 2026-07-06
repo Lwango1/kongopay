@@ -3,6 +3,11 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+
+process.on('unhandledRejection', (err) => {
+  console.warn('[App] Unhandled rejection (non-fatal):', err?.message || err);
+});
+
 import { initializeFirebase } from './config/firebase.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { apiLimiter, authLimiter } from './middleware/rateLimiter.js';

@@ -1,15 +1,5 @@
-import { initializeApp, getApps } from "firebase/app";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { auth } from "./firebase";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCgIZMG7n0feKatCNr_b1plf4tOzzKHnac",
-  authDomain: "kongopay-19815.firebaseapp.com",
-  projectId: "kongopay-19815",
-  storageBucket: "kongopay-19815.firebasestorage.app",
-  messagingSenderId: "1043431316190",
-  appId: "1:1043431316190:web:ae101c7c8169516b39c04f",
-};
 
 const VAPID_KEY = process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || "";
 
@@ -18,7 +8,17 @@ let swRegistration: ServiceWorkerRegistration | null = null;
 
 async function ensureMessaging() {
   if (messaging) return messaging;
-  const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
+  const { getApps, initializeApp } = await import("firebase/app");
+  const app = getApps().length === 0
+    ? initializeApp({
+        apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "",
+        authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "",
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "",
+        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "",
+        messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "",
+        appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
+      })
+    : getApps()[0];
   messaging = getMessaging(app);
   return messaging;
 }
