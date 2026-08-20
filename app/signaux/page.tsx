@@ -10,12 +10,7 @@ import NewsTrader from "@/components/NewsTrader";
 import AdBanner from "@/components/AdBanner";
 
 const INDICES_CONFIG: Record<string, { color: string; bgColor: string }> = {
-  "Boom 500": { color: "#22c55e", bgColor: "rgba(34,197,94,0.1)" },
-  "Boom 900": { color: "#16a34a", bgColor: "rgba(22,163,74,0.1)" },
-  "Boom 1000": { color: "#15803d", bgColor: "rgba(21,128,61,0.1)" },
-  "Crash 500": { color: "#fb7185", bgColor: "rgba(251,113,133,0.1)" },
   "Crash 900": { color: "#f43f5e", bgColor: "rgba(244,63,94,0.1)" },
-  "Crash 1000": { color: "#be123c", bgColor: "rgba(190,18,60,0.1)" },
 };
 
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
@@ -207,7 +202,7 @@ export default function SignauxPage() {
                     {connected ? "Live" : "Déconnecté"}
                   </div>
                 </div>
-                <p className="text-text-secondary text-sm">Scanner automatique BOOM & CRASH — Support/Résistance + Squeeze + Confluence TF</p>
+                <p className="text-text-secondary text-sm">Scanner automatique CRASH 900 — Support/Résistance + Squeeze + Confluence TF</p>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={() => setSoundEnabled(!soundEnabled)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${soundEnabled ? "bg-surface border border-border text-text-secondary" : "bg-danger/10 text-danger border border-danger/30"}`}>
@@ -231,7 +226,7 @@ export default function SignauxPage() {
               </div>
               <div className="rounded-xl border border-border bg-surface p-4 text-center">
                 <Gauge size={18} className="mx-auto text-primary mb-1" />
-                <p className="text-2xl font-bold text-primary">{result?.totalAnalyzed ?? 0}/6</p>
+                <p className="text-2xl font-bold text-primary">{result?.totalAnalyzed ?? 0}/1</p>
                 <p className="text-xs text-text-muted">Indices analysés</p>
               </div>
               <div className="rounded-xl border border-border bg-surface p-4 text-center">
@@ -276,7 +271,7 @@ export default function SignauxPage() {
             {connected && !waitingData && goodOpps.length === 0 && !showAll && (
               <div className="mb-6 p-4 rounded-xl border border-border bg-surface/50 text-center text-sm text-text-secondary">
                 <Gauge size={20} className="inline mr-2 text-primary" />
-                Aucune opportunité ≥80% pour le moment. Le scan surveille les 6 indices en continu.
+                Aucune opportunité ≥80% pour le moment. Le scan surveille l'indice Crash 900 en continu.
               </div>
             )}
 

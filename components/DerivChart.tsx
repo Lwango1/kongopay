@@ -19,12 +19,7 @@ type TimeFrame = "15m" | "30m" | "1h" | "2h";
 const TF_LABELS: Record<TimeFrame, string> = { "15m": "15 min", "30m": "30 min", "1h": "1 heure", "2h": "2 heures" };
 
 const INDICES = [
-  { type: "BOOM" as IndexType, number: 500, label: "Boom 500", color: "#22c55e" },
-  { type: "BOOM" as IndexType, number: 900, label: "Boom 900", color: "#16a34a" },
-  { type: "BOOM" as IndexType, number: 1000, label: "Boom 1000", color: "#15803d" },
-  { type: "CRASH" as IndexType, number: 500, label: "Crash 500", color: "#fb7185" },
   { type: "CRASH" as IndexType, number: 900, label: "Crash 900", color: "#f43f5e" },
-  { type: "CRASH" as IndexType, number: 1000, label: "Crash 1000", color: "#be123c" },
 ];
 
 function computeRSIData(candles: Candlestick[]): { time: number; value: number }[] {
@@ -41,7 +36,7 @@ function computeRSIData(candles: Candlestick[]): { time: number; value: number }
 
 
 export default function DerivChart() {
-  const [selectedSymbol, setSelectedSymbol] = useState("BOOM_500");
+  const [selectedSymbol, setSelectedSymbol] = useState("CRASH_900");
   const [timeframe, setTimeframe] = useState<TimeFrame>("15m");
   const [fullscreen, setFullscreen] = useState(false);
   const [renderTick, setRenderTick] = useState(0);

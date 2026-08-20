@@ -47,7 +47,7 @@ export default function DerivScreen() {
   const [state, setState] = useState<DerivState | null>(null);
   const [spikes, setSpikes] = useState<SpikeMap>({});
   const [scanResult, setScanResult] = useState<MarketScanResult | null>(null);
-  const [activeKey, setActiveKey] = useState('BOOM_500');
+  const [activeKey, setActiveKey] = useState('CRASH_900');
   const [activeTab, setActiveTab] = useState<'detail' | 'scan'>('scan');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);

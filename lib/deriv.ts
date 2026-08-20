@@ -58,12 +58,7 @@ export interface DerivSnapshot {
 }
 
 const INDICES: { type: IndexType; number: number; symbol: string }[] = [
-  { type: "BOOM", number: 500, symbol: "BOOM500" },
-  { type: "BOOM", number: 900, symbol: "BOOM900" },
-  { type: "BOOM", number: 1000, symbol: "BOOM1000" },
-  { type: "CRASH", number: 500, symbol: "CRASH500" },
   { type: "CRASH", number: 900, symbol: "CRASH900" },
-  { type: "CRASH", number: 1000, symbol: "CRASH1000" },
 ];
 
 function getKey(type: IndexType, num: number) { return `${type}_${num}`; }
@@ -287,8 +282,7 @@ function processMessage(data: any) {
 }
 
 const INDICES_FOR_HISTORY = [
-  "BOOM500", "BOOM900", "BOOM1000",
-  "CRASH500", "CRASH900", "CRASH1000",
+  "CRASH900",
 ];
 
 function subscribeAll() {

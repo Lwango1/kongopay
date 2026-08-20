@@ -4,12 +4,7 @@ import { fitSpikeIntervals, spikeProbability } from './spikeIntervalModel.js';
 import { computeAdvancedFeatures } from './advancedFeatures.js';
 
 const INDICES = [
-  { type: 'BOOM', number: 500, symbol: 'BOOM500' },
-  { type: 'BOOM', number: 900, symbol: 'BOOM900' },
-  { type: 'BOOM', number: 1000, symbol: 'BOOM1000' },
-  { type: 'CRASH', number: 500, symbol: 'CRASH500' },
   { type: 'CRASH', number: 900, symbol: 'CRASH900' },
-  { type: 'CRASH', number: 1000, symbol: 'CRASH1000' },
 ];
 
 const DERIV_SYMBOLS = INDICES.map(i => i.symbol);

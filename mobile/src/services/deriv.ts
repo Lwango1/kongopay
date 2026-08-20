@@ -40,12 +40,7 @@ export type SpikeMap = Record<string, SpikePrediction>;
 const API_BASE = 'http://localhost:3000/api/deriv';
 
 export const INDICES = [
-  { type: 'BOOM', number: 500, label: 'Boom 500', color: '#22c55e' },
-  { type: 'BOOM', number: 900, label: 'Boom 900', color: '#16a34a' },
-  { type: 'BOOM', number: 1000, label: 'Boom 1000', color: '#15803d' },
-  { type: 'CRASH', number: 500, label: 'Crash 500', color: '#fb7185' },
   { type: 'CRASH', number: 900, label: 'Crash 900', color: '#f43f5e' },
-  { type: 'CRASH', number: 1000, label: 'Crash 1000', color: '#be123c' },
 ];
 
 export async function fetchDerivState(): Promise<{ indices: DerivState; source: string }> {

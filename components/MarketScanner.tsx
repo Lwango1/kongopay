@@ -14,12 +14,7 @@ type Opportunity = MarketOpportunity;
 type ScanResult = MarketScanResult;
 
 const INDICES_CONFIG: Record<string, { color: string; bgColor: string }> = {
-  "Boom 500": { color: "#22c55e", bgColor: "rgba(34,197,94,0.1)" },
-  "Boom 900": { color: "#16a34a", bgColor: "rgba(22,163,74,0.1)" },
-  "Boom 1000": { color: "#15803d", bgColor: "rgba(21,128,61,0.1)" },
-  "Crash 500": { color: "#fb7185", bgColor: "rgba(251,113,133,0.1)" },
   "Crash 900": { color: "#f43f5e", bgColor: "rgba(244,63,94,0.1)" },
-  "Crash 1000": { color: "#be123c", bgColor: "rgba(190,18,60,0.1)" },
 };
 
 const SIGNAL_EXPIRY_MS = 5 * 60 * 1000;
@@ -301,7 +296,7 @@ export default function MarketScanner() {
         {connected && !waitingData && goodOpps.length === 0 && !showAll && (
           <div className="mb-6 p-4 rounded-xl border border-border bg-surface/50 text-center text-sm text-text-secondary">
             <Gauge size={20} className="inline mr-2 text-primary" />
-            Aucune opportunité ≥80% pour le moment. Le scan surveille les 6 indices en continu.
+            Aucune opportunité ≥80% pour le moment. Le scan surveille l'indice Crash 900 en continu.
           </div>
         )}
 

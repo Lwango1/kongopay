@@ -131,8 +131,7 @@ async function startBackgroundTasks() {
       const activeSignals = []; // collect from signalTracker if needed
       const accountBalance = 1000; // TODO: get from user wallet
 
-      for (const idx of [{ type: 'BOOM', number: 500 }, { type: 'BOOM', number: 1000 },
-        { type: 'CRASH', number: 500 }, { type: 'CRASH', number: 1000 }]) {
+      for (const idx of [{ type: 'CRASH', number: 900 }]) {
         const signal = await derivService.generateSignal(idx.type, idx.number);
         if (signal && signal.spikeProbability > 80 && signal.levelTouched && signal.tfConfluence >= 2) {
           // Risk management filter
